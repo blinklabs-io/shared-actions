@@ -75,6 +75,51 @@ jobs:
               output.write('charts=' + json.dumps(sorted(charts)) + '\n')
           PY
 
+      - name: Verify chart paths
+        if: steps.charts.outputs.charts != '[]'
+        shell: bash
+        env:
+          CHARTS: ${{ steps.charts.outputs.charts }}
+        run: |
+          set -euo pipefail
+          python3 <<'PYTHON'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          workspace = Path.cwd().resolve()
+          tracked = set(subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0'))
+
+          def inspect(path, ancestors):
+              try:
+                  resolved = path.resolve(strict=True)
+              except (OSError, RuntimeError) as error:
+                  raise SystemExit(f'Chart path cannot be resolved: {path}') from error
+              if not resolved.is_relative_to(workspace):
+                  raise SystemExit(f'Chart path must be inside the repository: {path}')
+              relative = resolved.relative_to(workspace)
+              if '.git' in relative.parts:
+                  raise SystemExit(f'Chart path must not include Git metadata: {path}')
+              if path.is_symlink():
+                  original = path.parent.resolve() / path.name
+                  if not original.is_relative_to(workspace) or original.relative_to(workspace).as_posix() not in tracked:
+                      raise SystemExit(f'Chart link must come from checked-out source: {path}')
+              if resolved.is_dir():
+                  if resolved in ancestors:
+                      raise SystemExit(f'Chart directory contains a symlink cycle: {path}')
+                  for child in resolved.iterdir():
+                      inspect(child, ancestors | {resolved})
+              elif resolved.is_file():
+                  if relative.as_posix() not in tracked:
+                      raise SystemExit(f'Chart file must come from checked-out source: {path}')
+              else:
+                  raise SystemExit(f'Chart path must be a regular file or directory: {path}')
+
+          for chart in json.loads(os.environ['CHARTS']):
+              inspect(Path(chart), set())
+          PYTHON
+
       - name: Install Helm
         if: steps.charts.outputs.charts != '[]'
         uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0

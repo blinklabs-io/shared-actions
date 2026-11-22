@@ -167,6 +167,7 @@ jobs:
           # Get list of packages from config
           PACKAGES=$(jq -r 'keys[]' "$UPSTREAM_CONFIG")
 
+          BLOCKED_UPDATES=0
           for PACKAGE in $PACKAGES; do
             echo "=========================================="
             echo "Checking package: $PACKAGE"
@@ -310,8 +311,8 @@ jobs:
 
             # Skip if an open PR already exists for this version.
             # Do not swallow errors here: if the API call fails we must abort
-            # rather than treat it as "no PR" and risk deleting a real branch.
-            EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')
+            # rather than treat it as "no PR" and prepare a duplicate update.
+            EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number // empty')
             if [[ -n "$EXISTING_PR" ]]; then
               echo "  PR #$EXISTING_PR already open for $BRANCH_NAME, skipping"
               continue
@@ -322,7 +323,8 @@ jobs:
             REMOTE_BRANCH=$(git ls-remote --heads origin "refs/heads/$BRANCH_NAME")
             if [[ -n "$REMOTE_BRANCH" ]]; then
               echo "ERROR: Remote branch $BRANCH_NAME exists without an open PR; manual review required"
-              exit 1
+              BLOCKED_UPDATES=1
+              continue
             fi
 
             # Create new version
@@ -407,3 +409,4 @@ jobs:
           echo "=========================================="
           echo "Version check complete"
           echo "=========================================="
+          exit "$BLOCKED_UPDATES"

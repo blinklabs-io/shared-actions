@@ -114,6 +114,7 @@ jobs:
 
           PACKAGES=$(jq -r 'keys[]' "$UPSTREAM_CONFIG")
 
+          BLOCKED_UPDATES=0
           for PACKAGE in $PACKAGES; do
             echo "=========================================="
             echo "Checking package: $PACKAGE"
@@ -264,9 +265,18 @@ jobs:
             fi
 
             BRANCH_NAME="chore/${PACKAGE}-${UPSTREAM_VERSION}"
-            EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --json number --jq '.[0].number' 2>/dev/null || echo "")
+            EXISTING_PR=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number // empty')
             if [[ -n "$EXISTING_PR" ]]; then
               echo "  PR #$EXISTING_PR already exists for this version, skipping"
+              continue
+            fi
+
+            # A remote branch without an open PR may contain manual changes
+            # or have been left by a failed PR creation. Preserve it for review.
+            REMOTE_BRANCH=$(git ls-remote --heads origin "refs/heads/$BRANCH_NAME")
+            if [[ -n "$REMOTE_BRANCH" ]]; then
+              echo "ERROR: Remote branch $BRANCH_NAME exists without an open PR; manual review required"
+              BLOCKED_UPDATES=1
               continue
             fi
 
@@ -279,7 +289,7 @@ jobs:
 
             git checkout -b "$BRANCH_NAME"
             git add "$COMPOSE_FILE"
-            git commit -m "chore: ${PACKAGE} ${UPSTREAM_VERSION}"
+            git commit -s -m "chore: ${PACKAGE} ${UPSTREAM_VERSION}"
 
             echo "  Pushing branch..."
             git push -u origin "$BRANCH_NAME"
@@ -310,3 +320,4 @@ jobs:
           echo "=========================================="
           echo "Version check complete"
           echo "=========================================="
+          exit "$BLOCKED_UPDATES"

@@ -1,11 +1,13 @@
 package workflows
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -178,39 +180,22 @@ func TestReusablePublishAttestsEveryUploadedBinary(t *testing.T) {
 	var uploadScript, subjectPath string
 	for _, step := range workflow.Jobs["build-binaries"].Steps {
 		switch step.Name {
-		case "Upload release asset":
+		case "Prepare release assets":
 			uploadScript = step.Run
 		case "Attest binary":
 			subjectPath = step.With["subject-path"]
 		}
 	}
 	if uploadScript == "" {
-		t.Fatal("build-binaries job has no Upload release asset step")
+		t.Fatal("build-binaries job has no Prepare release assets step")
 	}
 	if !strings.Contains(subjectPath, "env.RELEASE_ASSET_FILENAMES") {
 		t.Fatalf("attestation subject-path does not use every uploaded filename: %q", subjectPath)
 	}
 
 	tmp := t.TempDir()
-	fakeBin := filepath.Join(tmp, "bin")
-	if err := os.Mkdir(fakeBin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for name, content := range map[string]string{
-		"jq": `#!/bin/sh
-json=$(cat)
-values=$(printf '%s\n' "$json" | sed -e 's/^\[//' -e 's/\]$//' -e 's/"//g' -e 's/,/\n/g')
-case "$2" in
-  '.[]') printf '%s\n' "$values" ;;
-  '.[0]') printf '%s\n' "$values" | head -n 1 ;;
-  *) exit 2 ;;
-esac
-`,
-		"curl": "#!/bin/sh\nexit 0\n",
-	} {
-		if err := os.WriteFile(filepath.Join(fakeBin, name), []byte(content), 0o755); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("jq required to execute the workflow script")
 	}
 	for _, name := range []string{"primary", "extra-one", "extra-two"} {
 		if err := os.WriteFile(filepath.Join(tmp, name), []byte(name), 0o600); err != nil {
@@ -220,34 +205,75 @@ esac
 	githubEnv := filepath.Join(tmp, "github-env")
 	cmd := exec.Command("bash", "-e", "-c", uploadScript)
 	cmd.Dir = tmp
-	cmd.Env = []string{
-		"PATH=" + fakeBin + ":/usr/bin:/bin",
-		"GITHUB_ENV=" + githubEnv,
+	cmd.Env = append(os.Environ(),
+		"GITHUB_ENV="+githubEnv,
 		"GITHUB_RUN_ID=42",
 		"GITHUB_RUN_ATTEMPT=1",
-		"GITHUB_REPOSITORY=blinklabs-io/actions",
 		"BINARY_NAME=primary",
 		"ADDITIONAL_BINARY_NAMES=[\"extra-one\",\"extra-two\"]",
 		"MATRIX_OS=linux",
 		"MATRIX_ARCH=amd64",
 		"BINARY_COMPRESS=false",
-		"GH_TOKEN=test-token",
-		"RELEASE_ID=1",
-		"RELEASE_TAG=v1.2.3",
-	}
+		"RELEASE_TAG=component/v1.2.3",
+	)
+
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("run binary upload step: %v\n%s", err, output)
+		t.Fatalf("run release asset preparation step: %v\n%s", err, output)
 	}
 	got, err := os.ReadFile(githubEnv)
 	if err != nil {
 		t.Fatalf("read GitHub environment file: %v", err)
 	}
 	want := "RELEASE_ASSET_FILENAMES<<RELEASE_ASSET_FILENAMES_EOF_42_1\n" +
-		"primary-v1.2.3-linux-amd64\nextra-one-v1.2.3-linux-amd64\nextra-two-v1.2.3-linux-amd64\n" +
+		"primary-component_v1.2.3-linux-amd64\nextra-one-component_v1.2.3-linux-amd64\nextra-two-component_v1.2.3-linux-amd64\n" +
 		"RELEASE_ASSET_FILENAMES_EOF_42_1\n"
 	if string(got) != want {
 		t.Errorf("release asset filenames = %q, want %q", got, want)
 	}
+
+	for _, input := range []string{`["extra-one",`, `{"unexpected":"extra-one"}`, `[false]`, `[""]`, `["extra-one\n"]`, `["primary"]`} {
+		t.Run(input, func(t *testing.T) {
+			outputPath := filepath.Join(t.TempDir(), "github-env")
+			invalid := exec.CommandContext(t.Context(), "bash", "-e", "-o", "pipefail", "-c", uploadScript)
+			invalid.Dir = tmp
+			invalid.Env = append(cmd.Environ(), "GITHUB_ENV="+outputPath, "ADDITIONAL_BINARY_NAMES="+input)
+			if out, err := invalid.CombinedOutput(); err == nil {
+				t.Fatalf("invalid additional binary names accepted: %s", out)
+			}
+			if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+				t.Fatalf("invalid additional binary names exported filenames: %v", err)
+			}
+		})
+	}
+
+	t.Run("compression is stable across build timestamps", func(t *testing.T) {
+		version, err := exec.CommandContext(t.Context(), "tar", "--version").Output()
+		if err != nil || !bytes.Contains(version, []byte("GNU tar")) {
+			t.Skip("GNU tar required to reproduce Ubuntu runner compression")
+		}
+		fixture := filepath.Join(tmp, "primary")
+		archive := filepath.Join(tmp, "primary-component_v1.2.3-linux-amd64.tar.gz")
+		packageBinary := func(timestamp time.Time) []byte {
+			t.Helper()
+			if err := os.Chtimes(fixture, timestamp, timestamp); err != nil {
+				t.Fatal(err)
+			}
+			compress := exec.CommandContext(t.Context(), "bash", "-e", "-o", "pipefail", "-c", uploadScript)
+			compress.Dir = tmp
+			compress.Env = append(cmd.Environ(), "BINARY_COMPRESS=true", "ADDITIONAL_BINARY_NAMES=[]")
+			if out, err := compress.CombinedOutput(); err != nil {
+				t.Fatalf("compress asset: %v\n%s", err, out)
+			}
+			contents, err := os.ReadFile(archive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return contents
+		}
+		if first, second := packageBinary(time.Unix(1, 0)), packageBinary(time.Unix(86401, 0)); !bytes.Equal(first, second) {
+			t.Fatal("archive changed despite identical binary contents and permissions")
+		}
+	})
 }
 
 func TestReusablePublishFinalizationGatesOptionalArtifacts(t *testing.T) {

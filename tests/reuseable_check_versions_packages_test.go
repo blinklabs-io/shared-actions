@@ -62,7 +62,7 @@ func TestPackageUpdatePreservesRemoteBranch(t *testing.T) {
 	if script == "" {
 		t.Fatal("package updater step missing")
 	}
-	for _, scenario := range []string{"new branch", "existing branch", "unavailable remote"} {
+	for _, scenario := range []string{"new branch", "existing branch", "blocked then eligible", "unavailable remote"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
 			remote := filepath.Join(t.TempDir(), "origin.git")
@@ -93,14 +93,19 @@ func TestPackageUpdatePreservesRemoteBranch(t *testing.T) {
 			git("config", "user.email", "updater@example.com")
 			git("config", "commit.gpgsign", "false")
 			git("remote", "add", "origin", remote)
-			write("upstream.json", `{"service":{"repo":"example/service","tag_pattern":"v"}}`, 0o644)
+			upstream := `{"service":{"repo":"example/service","tag_pattern":"v"}}`
+			if scenario == "blocked then eligible" {
+				upstream = `{"service":{"repo":"example/service","tag_pattern":"v"},"worker":{"repo":"example/worker","tag_pattern":"v"}}`
+				write("packages/worker/worker-1.2.3.yaml", "version: 1.2.3\n", 0o644)
+			}
+			write("upstream.json", upstream, 0o644)
 			write("packages/service/service-1.2.3.yaml", "version: 1.2.3\n", 0o644)
 			git("add", "upstream.json", "packages")
 			git("commit", "-s", "-m", "test: initial package")
 			git("push", "origin", "main")
 			branch := "chore/service-1.2.4"
 			var before string
-			if scenario == "existing branch" {
+			if scenario == "existing branch" || scenario == "blocked then eligible" {
 				git("checkout", "-b", branch)
 				write("packages/service/service-1.2.4.yaml", "version: 1.2.4\nmanual: keep\n", 0o644)
 				git("add", "packages")
@@ -116,13 +121,13 @@ func TestPackageUpdatePreservesRemoteBranch(t *testing.T) {
 			write("bin/gh", `#!/bin/sh
 case "$1 $2" in
   "auth setup-git") exit 0;;
-  "api repos/example/service/releases/latest") echo v1.2.4;;
+  "api repos/example/service/releases/latest"|"api repos/example/worker/releases/latest") echo v1.2.4;;
   "pr list") exit 0;;
-  "pr create") echo created > "$FAKE_PR_CREATED_FILE";;
+  "pr create") printf '%s\n' "$@" > "$FAKE_PR_CREATED_FILE";;
   *) exit 1;;
 esac
 `, 0o755)
-			write("add-version.sh", "#!/bin/sh\necho generated > generated\nprintf 'version: %s\\n' \"$2\" > \"packages/$1/$1-$2.yaml\"\n", 0o755)
+			write("add-version.sh", "#!/bin/sh\necho \"$1\" >> generated\nprintf 'version: %s\\n' \"$2\" > \"packages/$1/$1-$2.yaml\"\n", 0o755)
 			write("cardano-up", "#!/bin/sh\nexit 0\n", 0o755)
 			cmd := exec.Command("bash", "-e", "-o", "pipefail", "-c", script)
 			cmd.Dir = root
@@ -143,11 +148,31 @@ esac
 				}
 				return
 			}
-			if scenario == "existing branch" && git("ls-remote", "--heads", "origin", "refs/heads/"+branch) != before+"\trefs/heads/"+branch {
+			if before != "" && git("ls-remote", "--heads", "origin", "refs/heads/"+branch) != before+"\trefs/heads/"+branch {
 				t.Fatal("existing remote branch was replaced")
 			}
 			if err == nil {
 				t.Fatalf("unsafe remote state succeeded:\n%s", out)
+			}
+			if scenario == "blocked then eligible" {
+				if !strings.Contains(string(out), "Remote branch "+branch+" exists without an open PR") {
+					t.Fatalf("blocked package did not report its existing branch:\n%s", out)
+				}
+				generated, err := os.ReadFile(filepath.Join(root, "generated"))
+				if err != nil || string(generated) != "worker\n" {
+					t.Fatalf("only the later package should be generated: %v, %q", err, generated)
+				}
+				pr, err := os.ReadFile(filepath.Join(root, "pr-created"))
+				if err != nil || !strings.Contains(string(pr), "--head\nchore/worker-1.2.4\n") {
+					t.Fatalf("later package PR missing: %v, %q", err, pr)
+				}
+				if body := git("show", "-s", "--format=%B", "origin/chore/worker-1.2.4"); !strings.Contains(body, "Signed-off-by: Updater <updater@example.com>") {
+					t.Fatal("later package update commit lacks signoff")
+				}
+				if contents := git("show", "origin/chore/worker-1.2.4:packages/worker/worker-1.2.4.yaml"); contents != "version: 1.2.4" {
+					t.Fatalf("later package version = %q", contents)
+				}
+				return
 			}
 			for _, path := range []string{"generated", "pr-created"} {
 				if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {

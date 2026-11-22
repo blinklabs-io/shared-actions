@@ -148,7 +148,7 @@ jobs:
             echo 'prepared chart archive does not match chart-sha256' >&2
             exit 1
           fi
-          helm lint "$package"
+          lint_args=("$package")
           template_args=("$RELEASE" "$package" --namespace "$NAMESPACE")
           workspace_path=$(realpath "$GITHUB_WORKSPACE")
           while IFS= read -r values_file; do
@@ -162,8 +162,10 @@ jobs:
               echo "values file must be inside the caller repository: $values_file" >&2
               exit 1
             fi
+            lint_args+=(--values "$values_path")
             template_args+=(--values "$values_path")
           done <<< "$VALUES_FILES"
+          helm lint "${lint_args[@]}"
           helm template "${template_args[@]}" > /dev/null
           artifact_suffix=$(openssl rand -hex 16)
           printf 'package-name=%s\n' "${package##*/}" >> "$GITHUB_OUTPUT"

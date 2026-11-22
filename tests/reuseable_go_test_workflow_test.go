@@ -346,3 +346,78 @@ func TestGoBuildPackageSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestAdditionalGoModulesReceiveTestEnvironment(t *testing.T) {
+	workflow := readReusableWorkflow(t, "../.github/workflows/reuseable-go-test.yml")
+	var script string
+	for _, step := range workflow.Jobs["go-test"].Steps {
+		if step.Name == "Test additional Go modules" {
+			script = step.Run
+			if step.Env["TEST_ENV"] != "${{ inputs.test-env }}" {
+				t.Error("additional modules must bind TEST_ENV to the caller input")
+			}
+			break
+		}
+	}
+	if script == "" {
+		t.Fatal("additional Go modules step missing")
+	}
+
+	for _, test := range []struct {
+		name, input, failModule, want string
+	}{
+		{
+			name:  "caller assignments reach both modules",
+			input: "FIXTURE_URL=postgres://localhost/db?param=first value\n\nFIXTURE_LITERAL=$value=value",
+			want: "module one|postgres://localhost/db?param=first value|$value=value|test ./...\n" +
+				"module-two|postgres://localhost/db?param=first value|$value=value|test ./...\n",
+		},
+		{
+			name: "empty input preserves existing environment",
+			want: "module one|inherited|unset|test ./...\nmodule-two|inherited|unset|test ./...\n",
+		},
+		{
+			name:       "module failure stops the step",
+			input:      "FIXTURE_URL=caller",
+			failModule: "module one",
+			want:       "module one|caller|unset|test ./...\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			bin := t.TempDir()
+			for _, dir := range []string{"module one", "module-two"} {
+				if err := os.Mkdir(filepath.Join(root, dir), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fakeGo := `#!/bin/sh
+module=${PWD##*/}
+printf '%s|%s|%s|%s\n' "$module" "$FIXTURE_URL" "${FIXTURE_LITERAL:-unset}" "$*"
+[ "$module" != "$FAIL_MODULE" ]
+`
+			if err := os.WriteFile(filepath.Join(bin, "go"), []byte(fakeGo), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.CommandContext(t.Context(), "bash", "-e", "-o", "pipefail", "-c", script)
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(),
+				"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"MODULE_DIRECTORIES=module one\n\nmodule-two",
+				"TEST_ENV="+test.input,
+				"TEST_TAGS=",
+				"TEST_LDFLAGS=",
+				"FIXTURE_URL=inherited",
+				"FIXTURE_LITERAL=",
+				"FAIL_MODULE="+test.failModule,
+			)
+			out, err := cmd.CombinedOutput()
+			if (err != nil) != (test.failModule != "") {
+				t.Fatalf("additional module command returned %v, output: %s", err, out)
+			}
+			if string(out) != test.want {
+				t.Errorf("module test invocations = %q, want %q", out, test.want)
+			}
+		})
+	}
+}

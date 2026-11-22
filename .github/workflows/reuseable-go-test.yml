@@ -209,7 +209,7 @@ on:
         type: string
         default: "."
       run-race-test:
-        description: Run a second `go test -race` pass after the regular test pass. Use only with platforms and architectures supported by the Go race detector.
+        description: Run a second `go test -race` pass on Linux after the regular test pass. Use a Linux architecture supported by the Go race detector.
         required: false
         type: boolean
         default: false
@@ -457,10 +457,17 @@ jobs:
         shell: bash
         env:
           MODULE_DIRECTORIES: ${{ inputs.additional-module-directories }}
+          TEST_ENV: ${{ inputs.test-env }}
           TEST_TAGS: ${{ inputs.test-tags }}
           TEST_LDFLAGS: ${{ inputs.test-ldflags }}
           GOARCH: ${{ matrix.go-arch }}
         run: |
+          if [ -n "$TEST_ENV" ]; then
+            while IFS= read -r _line; do
+              [ -z "$_line" ] && continue
+              export "${_line?}"
+            done <<< "$TEST_ENV"
+          fi
           _build_flags=()
           if [ -n "$TEST_TAGS" ]; then
             _build_flags+=(-tags "$TEST_TAGS")
