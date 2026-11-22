@@ -1,0 +1,125 @@
+//go:build windows && desktopintegration
+
+package workflows
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func TestDesktopWindowsCGO(t *testing.T) {
+	wf := loadDesktopWorkflow(t)
+	var script string
+	for _, step := range wf.Jobs["build-binaries"].Steps {
+		if step.Name == "Build binary (Windows)" {
+			script = step.Run
+			break
+		}
+	}
+	if script == "" {
+		t.Fatal("Windows desktop build step missing")
+	}
+	location := "MSYS2_AMD64_LOC"
+	if runtime.GOARCH == "arm64" {
+		location = "MSYS2_ARM64_LOC"
+	}
+	if os.Getenv(location) == "" {
+		t.Fatalf("%s must identify an MSYS2 installation with the native C/C++ compiler", location)
+	}
+
+	t.Run("tray", func(t *testing.T) {
+		testDesktopWindowsBuild(t, script, "true", false)
+	})
+	t.Run("core-only without MSYS2", func(t *testing.T) {
+		t.Setenv("MSYS2_AMD64_LOC", "")
+		t.Setenv("MSYS2_ARM64_LOC", "")
+		testDesktopWindowsBuild(t, script, "false", false)
+	})
+	t.Run("core failure stops tray", func(t *testing.T) {
+		testDesktopWindowsBuild(t, script, "true", true)
+	})
+}
+
+func testDesktopWindowsBuild(t *testing.T, script, tray string, failCore bool) {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module desktopfixture\n\ngo 1.26\n",
+		"Makefile": "build:\n\tCGO_ENABLED=0 go build -o cli.exe ./cli\n" +
+			"build-tray:\n\tCGO_ENABLED=1 go build -x -o tray.exe ./tray\n",
+		"cli/main.go": "package main\nfunc main() {}\n",
+		"tray/main.go": `package main
+/* int answer(void); */
+import "C"
+func main() {
+	if C.answer() != 42 {
+		panic("unexpected C++ result")
+	}
+}
+`,
+		"tray/answer.cc": `#include <string>
+extern "C" int answer(void) {
+	return std::stoi(std::string("42"));
+}
+`,
+	}
+	if failCore {
+		files["cli/main.go"] = "package main\nfunc main() { missingCoreSymbol() }\n"
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Match the Actions pwsh wrapper, including propagation of native command failures.
+	script = "$ErrorActionPreference = 'Stop'\n" + script + `
+if (Test-Path -LiteralPath variable:\LASTEXITCODE) { exit $LASTEXITCODE }
+`
+	path := filepath.Join(dir, "build.ps1")
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MATRIX_OS", "windows")
+	t.Setenv("MATRIX_ARCH", runtime.GOARCH)
+	t.Setenv("MATRIX_TRAY", tray)
+	t.Setenv("GOWORK", "off")
+	// Rebuild runtime/cgo instead of accepting a cached object from another compiler.
+	t.Setenv("GOCACHE", filepath.Join(dir, "cache"))
+	cmd := exec.CommandContext(t.Context(), "pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", path)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if failCore {
+		if err == nil {
+			t.Fatal("core build failure was masked by a later Windows command")
+		}
+		if !strings.Contains(string(output), "missingCoreSymbol") {
+			t.Fatalf("expected the core compiler failure, got: %v\n%s", err, output)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "tray.exe")); !os.IsNotExist(err) {
+			t.Fatalf("tray build ran after the core build failed, stat error: %v", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("Windows desktop build failed: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cli.exe")); err != nil {
+		t.Fatalf("Windows desktop build did not produce cli.exe: %v", err)
+	}
+	_, err = os.Stat(filepath.Join(dir, "tray.exe"))
+	if tray == "true" && err != nil {
+		t.Fatalf("Windows tray build did not produce tray.exe: %v", err)
+	}
+	if tray == "false" && !os.IsNotExist(err) {
+		t.Fatalf("core-only build must omit tray.exe, stat error: %v", err)
+	}
+	t.Logf("Windows build succeeded:\n%s", output)
+}
