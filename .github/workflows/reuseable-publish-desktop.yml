@@ -275,6 +275,7 @@ jobs:
           }
 
           make build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ("$env:MATRIX_TRAY" -eq "true") {
             make build-tray
           }

@@ -21,3 +21,9 @@ uploading it; mismatched assets require review. Custom binary builds receive
 Chart publication accepts checked-out source files, including tracked links to
 shared files inside the repository. Git metadata, untracked files, links outside
 the checkout, and symlink cycles are rejected before Helm loads chart content.
+
+For local chart deployment, compute `chart-sha256` from the complete archive
+created with Helm 4.3.1 and `SOURCE_DATE_EPOCH=0 helm package <chart>`. If the chart
+has dependencies, first run `helm dependency build <chart>` with its committed
+`Chart.lock`. The deploy workflow uses the same timestamp normalization so checkout times do not change
+the archive digest. For OCI charts, hash the archive pulled from the registry.

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -31,16 +32,19 @@ func TestDesktopWindowsCGO(t *testing.T) {
 	}
 
 	t.Run("tray", func(t *testing.T) {
-		testDesktopWindowsBuild(t, script, "true")
+		testDesktopWindowsBuild(t, script, "true", false)
 	})
 	t.Run("core-only without MSYS2", func(t *testing.T) {
 		t.Setenv("MSYS2_AMD64_LOC", "")
 		t.Setenv("MSYS2_ARM64_LOC", "")
-		testDesktopWindowsBuild(t, script, "false")
+		testDesktopWindowsBuild(t, script, "false", false)
+	})
+	t.Run("core failure stops tray", func(t *testing.T) {
+		testDesktopWindowsBuild(t, script, "true", true)
 	})
 }
 
-func testDesktopWindowsBuild(t *testing.T, script, tray string) {
+func testDesktopWindowsBuild(t *testing.T, script, tray string, failCore bool) {
 	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
@@ -62,6 +66,9 @@ extern "C" int answer(void) {
 	return std::stoi(std::string("42"));
 }
 `,
+	}
+	if failCore {
+		files["cli/main.go"] = "package main\nfunc main() { missingCoreSymbol() }\n"
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
@@ -89,6 +96,18 @@ if (Test-Path -LiteralPath variable:\LASTEXITCODE) { exit $LASTEXITCODE }
 	cmd := exec.CommandContext(t.Context(), "pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", path)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
+	if failCore {
+		if err == nil {
+			t.Fatal("core build failure was masked by a later Windows command")
+		}
+		if !strings.Contains(string(output), "missingCoreSymbol") {
+			t.Fatalf("expected the core compiler failure, got: %v\n%s", err, output)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "tray.exe")); !os.IsNotExist(err) {
+			t.Fatalf("tray build ran after the core build failed, stat error: %v", err)
+		}
+		return
+	}
 	if err != nil {
 		t.Fatalf("Windows desktop build failed: %v\n%s", err, output)
 	}

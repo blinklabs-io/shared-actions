@@ -25,7 +25,7 @@ on:
         type: string
         default: ""
       chart-sha256:
-        description: SHA-256 of the complete chart archive to deploy.
+        description: SHA-256 of the complete chart archive. Package local charts with Helm 4.3.1 and SOURCE_DATE_EPOCH=0.
         required: true
         type: string
       values-files:
@@ -132,7 +132,7 @@ jobs:
               fi
               helm dependency build "$chart_path"
             fi
-            helm package "$chart_path" --destination "$chart_dir"
+            SOURCE_DATE_EPOCH=0 helm package "$chart_path" --destination "$chart_dir"
           fi
 
           shopt -s nullglob
@@ -217,7 +217,7 @@ jobs:
             echo 'release and namespace are required' >&2
             exit 1
           fi
-          if [[ ! "$PACKAGE_NAME" =~ ^[A-Za-z0-9._-]+\.tgz$ || ! "$CHART_SHA256" =~ ^[[:xdigit:]]{64}$ ]]; then
+          if [[ ! "$PACKAGE_NAME" =~ ^[A-Za-z0-9._+-]+\.tgz$ || ! "$CHART_SHA256" =~ ^[[:xdigit:]]{64}$ ]]; then
             echo 'invalid prepared chart metadata' >&2
             exit 1
           fi
