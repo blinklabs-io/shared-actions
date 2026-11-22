@@ -36,8 +36,8 @@ on:
         description: >
           Substring that, when present in the tag name, marks it as a pre-release.
           When matched: GitHub release is flagged as pre-release and the :latest
-          manifest is not updated. Leave empty (default) to treat every tag as a
-          stable release.
+          manifest is not updated. Named prerelease tags never update :latest;
+          numeric image revisions retain stable aliases unless this pattern matches.
         required: false
         type: string
         default: ""
@@ -113,7 +113,7 @@ jobs:
             suffix=-amd64
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Full version, with revision
             type=match,pattern=v(.*),group=1
             # branch
@@ -211,7 +211,7 @@ jobs:
             suffix=-arm64v8
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Full version, with revision
             type=match,pattern=v(.*),group=1
             # branch
@@ -265,7 +265,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      security-events: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 https://github.com/actions/checkout/releases/tag/v7.0.1
         with:
@@ -296,7 +295,7 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Full version, with revision
             type=match,pattern=v(.*),group=1
             # branch
@@ -313,7 +312,7 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Plain semver tag (no revision suffix, e.g. v1.2.3)
             type=semver,pattern={{version}}
 
@@ -326,7 +325,7 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Full version, with revision
             type=match,pattern=v(.*),group=1
             # branch
@@ -343,7 +342,7 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Plain semver tag (no revision suffix, e.g. v1.2.3)
             type=semver,pattern={{version}}
 
@@ -365,10 +364,11 @@ jobs:
         env:
           GHCR_IMAGE: ghcr.io/${{ inputs.ghcr-image }}
           GHCR_TAG_TAGS: ${{ steps.meta-ghcr-tag.outputs.tags }}
+          RELEASE_TAG: ${{ github.ref_name }}
           IS_PRERELEASE: ${{ inputs.prerelease-pattern != '' && contains(github.ref, inputs.prerelease-pattern) }}
         run: |
           for t in $GHCR_TAG_TAGS; do
-            if [ "$IS_PRERELEASE" = "true" ]; then
+            if [[ "$IS_PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
               docker buildx imagetools create -t "${t}" "${t}-amd64" "${t}-arm64v8"
             else
               docker buildx imagetools create \
@@ -393,10 +393,11 @@ jobs:
         env:
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DH_TAG_TAGS: ${{ steps.meta-dockerhub-tag.outputs.tags }}
+          RELEASE_TAG: ${{ github.ref_name }}
           IS_PRERELEASE: ${{ inputs.prerelease-pattern != '' && contains(github.ref, inputs.prerelease-pattern) }}
         run: |
           for t in $DH_TAG_TAGS; do
-            if [ "$IS_PRERELEASE" = "true" ]; then
+            if [[ "$IS_PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
               docker buildx imagetools create -t "${t}" "${t}-amd64" "${t}-arm64v8"
             else
               docker buildx imagetools create \
@@ -405,28 +406,6 @@ jobs:
                 "${t}-amd64" "${t}-arm64v8"
             fi
           done
-
-      - name: Run Trivy vulnerability scanner
-        # Only scan when a concrete image version was resolved. On plain branch
-        # pushes docker/metadata-action can leave `version` empty, which would
-        # make scan-ref point at `ghcr.io/<image>:` (no tag) and fail Trivy —
-        # failing an otherwise-successful publish. Skipping keeps the scan
-        # on-by-default for releases without breaking branch publishes.
-        if: inputs.enable-trivy-scan && steps.meta-ghcr.outputs.version != ''
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.36.0
-        with:
-          scan-type: 'image'
-          scan-ref: 'ghcr.io/${{ inputs.ghcr-image }}:${{ steps.meta-ghcr.outputs.version }}'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          ignore-unfixed: true
-          severity: 'HIGH,CRITICAL'
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        if: always() && inputs.enable-trivy-scan && steps.meta-ghcr.outputs.version != ''
-        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3 https://github.com/github/codeql-action/releases/tag/codeql-bundle-v4.39.3
-        with:
-          sarif_file: 'trivy-results.sarif'
 
       - name: Update Docker Hub description
         if: inputs.description != ''
@@ -438,12 +417,65 @@ jobs:
           readme-filepath: ${{ inputs.readme-filepath }}
           short-description: ${{ inputs.description }}
 
+  scan-images:
+    needs: [multi-arch-manifest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            tag: amd64
+          - arch: arm64
+            tag: arm64v8
+    steps:
+      - name: Login to GHCR
+        if: inputs.enable-trivy-scan
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        if: inputs.enable-trivy-scan
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ inputs.ghcr-image }}
+          flavor: latest=false
+          tags: |
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
+            type=match,pattern=v(.*),group=1
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - name: Run Trivy vulnerability scanner (${{ matrix.arch }})
+        if: inputs.enable-trivy-scan && steps.meta.outputs.version != ''
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/${{ matrix.arch }}
+        with:
+          scan-type: image
+          scan-ref: ghcr.io/${{ inputs.ghcr-image }}:${{ steps.meta.outputs.version }}-${{ matrix.tag }}
+          format: sarif
+          output: trivy-results-${{ matrix.arch }}.sarif
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Upload Trivy scan results (${{ matrix.arch }})
+        if: always() && inputs.enable-trivy-scan && steps.meta.outputs.version != ''
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: trivy-results-${{ matrix.arch }}.sarif
+          category: trivy-${{ matrix.arch }}
+
   github-release:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
-    needs: [multi-arch-manifest]
+    needs: [multi-arch-manifest, scan-images]
     steps:
       - run: "echo \"RELEASE_TAG=${GITHUB_REF#refs/tags/}\" >> \"$GITHUB_ENV\""
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9 https://github.com/actions/github-script/releases/tag/v9

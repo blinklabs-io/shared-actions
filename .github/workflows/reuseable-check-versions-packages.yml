@@ -95,6 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 https://github.com/actions/checkout/releases/tag/v7.0.1
         with:
+          ref: ${{ inputs.base-branch }}
           fetch-depth: 0
           token: ${{ secrets.token || github.token }}
           persist-credentials: false
@@ -127,8 +128,9 @@ jobs:
             echo "ERROR: Could not find linux-amd64 asset for ${CARDANO_UP_REPO} ${CARDANO_UP_VERSION}"
             exit 1
           fi
-          curl -sLo cardano-up "$DOWNLOAD_URL"
+          curl -fsSL -o cardano-up "$DOWNLOAD_URL"
           chmod +x cardano-up
+          ./cardano-up --help >/dev/null
 
       - name: Check and create PRs for new versions
         env:
@@ -315,6 +317,14 @@ jobs:
               continue
             fi
 
+            # A branch without an open PR can contain manual work or a previous
+            # publication attempt. Preserve it for review instead of replacing it.
+            REMOTE_BRANCH=$(git ls-remote --heads origin "refs/heads/$BRANCH_NAME")
+            if [[ -n "$REMOTE_BRANCH" ]]; then
+              echo "ERROR: Remote branch $BRANCH_NAME exists without an open PR; manual review required"
+              exit 1
+            fi
+
             # Create new version
             echo "  Creating new version file..."
             "$ADD_VERSION_SCRIPT" "$PACKAGE" "$UPSTREAM_VERSION"
@@ -338,15 +348,7 @@ jobs:
             echo "  Creating branch and commit..."
             git checkout -b "$BRANCH_NAME"
             git add "${PACKAGES_DIR}/${PACKAGE}/${PACKAGE}-${UPSTREAM_VERSION}.yaml"
-            git commit -m "chore: ${PACKAGE} ${UPSTREAM_VERSION}"
-
-            # If a stale remote branch exists from a previous failed run
-            # (no open PR was found above), delete it so we can push cleanly
-            # without force-pushing over potential manual commits.
-            if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
-              echo "  Stale remote branch $BRANCH_NAME found with no open PR, deleting"
-              git push origin --delete "$BRANCH_NAME"
-            fi
+            git commit -s -m "chore: ${PACKAGE} ${UPSTREAM_VERSION}"
 
             # Push branch
             echo "  Pushing branch..."

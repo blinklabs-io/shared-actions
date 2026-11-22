@@ -376,7 +376,7 @@ jobs:
             suffix=-amd64
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ !inputs.prerelease }}
             # branch
             type=ref,event=branch
             # semver
@@ -420,7 +420,7 @@ jobs:
             latest=false
             suffix=-${{ inputs.extra-image-suffix }}-amd64
           tags: |
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ !inputs.prerelease }}
             type=ref,event=branch
             type=semver,pattern={{version}}
       - name: push extra image
@@ -499,7 +499,7 @@ jobs:
             suffix=-arm64v8
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ !inputs.prerelease }}
             # branch
             type=ref,event=branch
             # semver
@@ -543,7 +543,7 @@ jobs:
             latest=false
             suffix=-${{ inputs.extra-image-suffix }}-arm64v8
           tags: |
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ !inputs.prerelease }}
             type=ref,event=branch
             type=semver,pattern={{version}}
       - name: push extra image
@@ -606,7 +606,7 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ !inputs.prerelease }}
             type=ref,event=branch
             type=semver,pattern={{version}}
       # GHCR: version tags only, used to also point :latest on tag builds.
@@ -617,7 +617,7 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ !inputs.prerelease }}
             type=semver,pattern={{version}}
 
       # Docker Hub metadata (only evaluated when docker-image is set).
@@ -629,7 +629,7 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ !inputs.prerelease }}
             type=ref,event=branch
             type=semver,pattern={{version}}
       - id: meta-dockerhub-tag
@@ -640,7 +640,7 @@ jobs:
           flavor: |
             latest=false
           tags: |
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ !inputs.prerelease }}
             type=semver,pattern={{version}}
 
       # Create and push manifests to GHCR. `docker buildx imagetools create`
@@ -657,9 +657,15 @@ jobs:
       - name: manifest-ghcr-latest
         if: startsWith(github.ref, 'refs/tags/')
         env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ inputs.prerelease }}
           GHCR_IMAGE: ghcr.io/${{ github.repository }}
           GHCR_TAG_TAGS: ${{ steps.meta-ghcr-tag.outputs.tags }}
         run: |
+          if [[ "$PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Skipping latest for a prerelease or non-version tag"
+            exit 0
+          fi
           for t in $GHCR_TAG_TAGS; do
             docker buildx imagetools create \
               -t "${GHCR_IMAGE}:latest" \
@@ -680,9 +686,15 @@ jobs:
       - name: manifest-dockerhub-latest
         if: inputs.docker-image != '' && startsWith(github.ref, 'refs/tags/')
         env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ inputs.prerelease }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DH_TAG_TAGS: ${{ steps.meta-dockerhub-tag.outputs.tags }}
         run: |
+          if [[ "$PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Skipping latest for a prerelease or non-version tag"
+            exit 0
+          fi
           for t in $DH_TAG_TAGS; do
             docker buildx imagetools create \
               -t "${DOCKER_IMAGE}:latest" \

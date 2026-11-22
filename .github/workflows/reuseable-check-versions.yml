@@ -71,6 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 https://github.com/actions/checkout/releases/tag/v7.0.1
         with:
+          ref: ${{ inputs.base-branch }}
           fetch-depth: 0
           token: ${{ secrets.token || github.token }}
           persist-credentials: false
@@ -247,7 +248,8 @@ jobs:
 
             echo "  Local version: $LOCAL_VERSION"
 
-            if [[ "$UPSTREAM_VERSION" == "$LOCAL_VERSION" ]]; then
+            if [[ "$UPSTREAM_VERSION" == "$LOCAL_VERSION" ]] || \
+               [[ "$(printf '%s\n' "$LOCAL_VERSION" "$UPSTREAM_VERSION" | sort -V | tail -1)" != "$UPSTREAM_VERSION" ]]; then
               echo "  Already up to date"
               continue
             fi

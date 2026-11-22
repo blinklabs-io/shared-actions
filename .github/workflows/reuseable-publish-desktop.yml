@@ -254,7 +254,7 @@ jobs:
           $env:GOOS = "$env:MATRIX_OS"
           $env:GOARCH = "$env:MATRIX_ARCH"
 
-          if ("$env:MATRIX_ARCH" -eq "amd64") {
+          if ("$env:MATRIX_TRAY" -eq "true" -and "$env:MATRIX_ARCH" -eq "amd64") {
             $msys2Loc = "$env:MSYS2_AMD64_LOC"
             $env:PATH = "$msys2Loc\mingw64\bin;$env:PATH"
             $env:CC = "$msys2Loc\mingw64\bin\gcc.exe"
@@ -264,7 +264,7 @@ jobs:
             & $env:CC --version
           }
 
-          if ("$env:MATRIX_ARCH" -eq "arm64") {
+          if ("$env:MATRIX_TRAY" -eq "true" -and "$env:MATRIX_ARCH" -eq "arm64") {
             $msys2Loc = "$env:MSYS2_ARM64_LOC"
             $env:PATH = "$msys2Loc\clangarm64\bin;$env:PATH"
             $env:CC = "$msys2Loc\clangarm64\bin\clang.exe"
@@ -700,7 +700,7 @@ jobs:
             suffix=-${{ matrix.arch }}
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1
             # branch
             type=ref,event=branch
             # semver
@@ -758,7 +758,7 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1
             # branch
             type=ref,event=branch
             # semver
@@ -837,7 +837,7 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=v(.*)-(.*),group=1
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1
             # branch
             type=ref,event=branch
             # semver

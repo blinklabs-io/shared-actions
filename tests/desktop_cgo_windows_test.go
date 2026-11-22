@@ -30,6 +30,18 @@ func TestDesktopWindowsCGO(t *testing.T) {
 		t.Fatalf("%s must identify an MSYS2 installation with the native C/C++ compiler", location)
 	}
 
+	t.Run("tray", func(t *testing.T) {
+		testDesktopWindowsBuild(t, script, "true")
+	})
+	t.Run("core-only without MSYS2", func(t *testing.T) {
+		t.Setenv("MSYS2_AMD64_LOC", "")
+		t.Setenv("MSYS2_ARM64_LOC", "")
+		testDesktopWindowsBuild(t, script, "false")
+	})
+}
+
+func testDesktopWindowsBuild(t *testing.T, script, tray string) {
+	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
 		"go.mod": "module desktopfixture\n\ngo 1.26\n",
@@ -70,7 +82,7 @@ if (Test-Path -LiteralPath variable:\LASTEXITCODE) { exit $LASTEXITCODE }
 	}
 	t.Setenv("MATRIX_OS", "windows")
 	t.Setenv("MATRIX_ARCH", runtime.GOARCH)
-	t.Setenv("MATRIX_TRAY", "true")
+	t.Setenv("MATRIX_TRAY", tray)
 	t.Setenv("GOWORK", "off")
 	// Rebuild runtime/cgo instead of accepting a cached object from another compiler.
 	t.Setenv("GOCACHE", filepath.Join(dir, "cache"))
@@ -80,10 +92,15 @@ if (Test-Path -LiteralPath variable:\LASTEXITCODE) { exit $LASTEXITCODE }
 	if err != nil {
 		t.Fatalf("Windows desktop build failed: %v\n%s", err, output)
 	}
-	for _, binary := range []string{"cli.exe", "tray.exe"} {
-		if _, err := os.Stat(filepath.Join(dir, binary)); err != nil {
-			t.Fatalf("Windows desktop build did not produce %s: %v", binary, err)
-		}
+	if _, err := os.Stat(filepath.Join(dir, "cli.exe")); err != nil {
+		t.Fatalf("Windows desktop build did not produce cli.exe: %v", err)
 	}
-	t.Logf("Windows C/C++ build succeeded:\n%s", output)
+	_, err = os.Stat(filepath.Join(dir, "tray.exe"))
+	if tray == "true" && err != nil {
+		t.Fatalf("Windows tray build did not produce tray.exe: %v", err)
+	}
+	if tray == "false" && !os.IsNotExist(err) {
+		t.Fatalf("core-only build must omit tray.exe, stat error: %v", err)
+	}
+	t.Logf("Windows build succeeded:\n%s", output)
 }

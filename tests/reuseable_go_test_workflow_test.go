@@ -293,3 +293,53 @@ func TestReusableGoWorkflowsCheckLatestToolchain(t *testing.T) {
 		}
 	}
 }
+
+func TestGoBuildPackageSelection(t *testing.T) {
+	workflow := readReusableWorkflow(t, "../.github/workflows/reuseable-go-test.yml")
+	var script string
+	for _, step := range workflow.Jobs["go-test"].Steps {
+		if step.Name == "go-build" {
+			script = step.Run
+			break
+		}
+	}
+	if script == "" {
+		t.Fatal("go-build step missing")
+	}
+
+	fakeBin := t.TempDir()
+	fakeGo := "#!/bin/sh\nprintf '%s\\n' \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "go"), []byte(fakeGo), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, os, build, windows, want string
+	}{
+		{"Windows explicit build packages", "Windows", "./cmd/server ./cmd/tool", "./internal/unit", "./cmd/server\n./cmd/tool\n"},
+		{"Windows test package fallback", "Windows", "", "./internal/unit", "./internal/unit\n"},
+		{"Windows ordinary test package fallback", "Windows", "", "", "./...\n"},
+		{"Linux explicit build packages", "Linux", "./cmd/server", "./internal/unit", "./cmd/server\n"},
+		{"Linux ordinary test package fallback", "Linux", "", "./internal/unit", "./...\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), "bash", "-e", "-o", "pipefail", "-c", script)
+			cmd.Dir = t.TempDir()
+			cmd.Env = append(os.Environ(),
+				"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"RUNNER_OS="+test.os,
+				"BUILD_PACKAGES="+test.build,
+				"WINDOWS_TEST_PACKAGES="+test.windows,
+				"TEST_PACKAGES=./...",
+				"BUILD_FLAGS=",
+				"TEST_TAGS=",
+			)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("go-build step failed: %v\n%s", err, output)
+			}
+			if want := "build\n-v\n" + test.want; string(output) != want {
+				t.Errorf("go arguments = %q, want %q", output, want)
+			}
+		})
+	}
+}

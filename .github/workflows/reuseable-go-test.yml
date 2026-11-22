@@ -345,9 +345,9 @@ jobs:
           _packages="$BUILD_PACKAGES"
           if [ -z "$_packages" ]; then
             _packages="$TEST_PACKAGES"
-          fi
-          if [ "$RUNNER_OS" = "Windows" ] && [ -n "$WINDOWS_TEST_PACKAGES" ]; then
-            _packages="$WINDOWS_TEST_PACKAGES"
+            if [ "$RUNNER_OS" = "Windows" ] && [ -n "$WINDOWS_TEST_PACKAGES" ]; then
+              _packages="$WINDOWS_TEST_PACKAGES"
+            fi
           fi
           _flags=()
           if [ -n "$BUILD_FLAGS" ]; then
