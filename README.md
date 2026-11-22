@@ -1,29 +1,33 @@
 # Shared Actions
 
-Reusable GitHub Actions workflows for Blink Labs repositories.
+Public reusable GitHub Actions workflows for Go CI, Docker and desktop releases,
+Flutter, Helm, and dependency updates.
 
-Call workflows from `.github/workflows` using an immutable commit SHA. The
-caller supplies workflow inputs, token permissions, and required secrets.
-This repository contains reusable implementations and their validation.
+## Use a workflow
 
-Run `go test -race ./...`, `go vet ./...`, and `actionlint` to validate changes.
-The Windows desktop compiler fixture runs in the Windows CI matrix.
+Call a workflow at the job level and pin it to a reviewed full commit SHA:
 
-The release-dispatch workflow sends notifications to the governance receiver
-in `blinklabs-io/actions`. Moving the reusable implementation here does not move
-that receiver. Callers must supply a token authorized to dispatch to that target.
+```yaml
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    uses: blinklabs-io/shared-actions/.github/workflows/reuseable-go-test.yml@41843cdf39c98dbace0bf6821535c1e074657b67
+    with:
+      run-build: true
+      run-vet: true
+```
 
-Release retries reuse only a draft marked for the same workflow run and binary.
-An existing asset must match its state, size, and SHA-256 before a retry skips
-uploading it; mismatched assets require review. Custom binary builds receive
-`BUILD_DATE` as the checked-out commit timestamp in UTC for reproducible retries.
+Browse [workflow definitions](.github/workflows) for inputs, defaults, secrets,
+and permissions. The caller controls triggers and supplies required permissions
+and secrets. Filenames retain the `reuseable-` spelling for compatibility.
+See [release and Helm requirements](docs/workflow-contracts.md) before publishing
+or deploying.
 
-Chart publication accepts checked-out source files, including tracked links to
-shared files inside the repository. Git metadata, untracked files, links outside
-the checkout, and symlink cycles are rejected before Helm loads chart content.
+## Contribute
 
-For local chart deployment, compute `chart-sha256` from the complete archive
-created with Helm 4.3.1 and `SOURCE_DATE_EPOCH=0 helm package <chart>`. If the chart
-has dependencies, first run `helm dependency build <chart>` with its committed
-`Chart.lock`. The deploy workflow uses the same timestamp normalization so checkout times do not change
-the archive digest. For OCI charts, hash the archive pulled from the registry.
+Read [AGENTS.md](AGENTS.md) for compatibility, security, review, and validation
+rules. For workflow changes, run `go test -race ./...`, `go vet ./...`, and
+`actionlint`; Windows compiler fixtures also run in CI.
