@@ -253,7 +253,9 @@ jobs:
                       bearer = json.load(response)['token']
               except HTTPError as error:
                   raise SystemExit(f'Unable to authenticate to the chart registry ({error.code})')
-              manifest_url = f'https://ghcr.io/v2/{repository}/manifests/{quote(version, safe="")}'
+              # Helm translates SemVer build metadata into an OCI-compatible tag.
+              tag = version.replace('+', '_')
+              manifest_url = f'https://ghcr.io/v2/{repository}/manifests/{quote(tag, safe="")}'
               manifest_request = Request(manifest_url, method='HEAD', headers={
                   'Authorization': 'Bearer ' + bearer,
                   'Accept': 'application/vnd.oci.image.manifest.v1+json',

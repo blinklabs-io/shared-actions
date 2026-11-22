@@ -41,13 +41,17 @@ func helmRegistryFixture(t *testing.T, manifestStatus int) *httptest.Server {
 			_, _ = w.Write([]byte(`{"token":"fixture-bearer"}`))
 		case "/v2/blinklabs-io/helm-charts/charts/alpha/manifests/1.0.0",
 			"/v2/blinklabs-io/helm-charts/charts/beta/manifests/1.0.0",
-			"/v2/blinklabs-io/helm-charts/charts/alpha/manifests/1.0.1":
+			"/v2/blinklabs-io/helm-charts/charts/alpha/manifests/1.0.1",
+			"/v2/blinklabs-io/helm-charts/charts/alpha/manifests/1.0.1_ci.7":
 			if r.Method != http.MethodHead || r.Header.Get("Authorization") != "Bearer fixture-bearer" {
 				t.Errorf("invalid manifest request: %s %s", r.Method, r.URL)
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
 			w.WriteHeader(manifestStatus)
+		case "/v2/blinklabs-io/helm-charts/charts/alpha/manifests/1.0.1+ci.7":
+			// Only the underscore tag exists in the registry.
+			w.WriteHeader(http.StatusNotFound)
 		default:
 			t.Errorf("unexpected registry request: %s", r.URL)
 			w.WriteHeader(http.StatusNotFound)
@@ -302,13 +306,14 @@ if action == os.environ['FAIL']:
 func TestHelmPublishExistingVersion(t *testing.T) {
 	script := helmPublishStep(t, "Package and push charts")
 	for _, tc := range []struct {
-		name, remote, wantError string
-		wantPush                bool
+		name, version, remote, wantError string
+		wantPush                         bool
 	}{
-		{"unpublished version", "missing", "", true},
-		{"identical retry", "same", "", false},
-		{"conflicting version", "different", "different contents", false},
-		{"registry lookup failure", "unauthorized", "Unable to check published chart version", false},
+		{"unpublished version", "1.0.1", "missing", "", true},
+		{"identical retry", "1.0.1", "same", "", false},
+		{"conflicting version", "1.0.1", "different", "different contents", false},
+		{"conflicting version with build metadata", "1.0.1+ci.7", "different", "different contents", false},
+		{"registry lookup failure", "1.0.1", "unauthorized", "Unable to check published chart version", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -333,6 +338,7 @@ import sys
 import tarfile
 
 args = sys.argv[1:]
+version = os.environ['CHART_VERSION']
 log = Path(os.environ['HELM_LOG'])
 cached = log.with_name('local.tgz')
 def record(value):
@@ -346,17 +352,17 @@ def archive(path, contents):
         bundle.addfile(member, io.BytesIO(contents))
 if args[0] == 'package':
     record('package')
-    path = Path(args[3], 'alpha-1.0.1.tgz')
-    archive(path, b'chart version 1.0.1')
+    path = Path(args[3], f'alpha-{version}.tgz')
+    archive(path, f'chart version {version}'.encode())
     shutil.copyfile(path, cached)
 elif args[:2] == ['registry', 'login']:
     record('login')
     assert sys.stdin.read() == 'fixture-token\n'
 elif args[:2] == ['show', 'chart']:
-    print('name: alpha\nversion: 1.0.1')
+    print(f'name: alpha\nversion: {version}')
 elif args[0] == 'pull':
     record('pull')
-    assert args[1:4] == ['oci://ghcr.io/blinklabs-io/helm-charts/charts/alpha', '--version', '1.0.1']
+    assert args[1:4] == ['oci://ghcr.io/blinklabs-io/helm-charts/charts/alpha', '--version', version]
     remote = os.environ['REMOTE_MODE']
     if remote == 'missing':
         print('Error: chart:1.0.1: not found', file=sys.stderr)
@@ -364,7 +370,7 @@ elif args[0] == 'pull':
     if remote == 'unauthorized':
         print('Error: unauthorized', file=sys.stderr)
         sys.exit(1)
-    path = Path(args[args.index('--destination') + 1], 'alpha-1.0.1.tgz')
+    path = Path(args[args.index('--destination') + 1], f'alpha-{version}.tgz')
     if remote == 'same':
         shutil.copyfile(cached, path)
     else:
@@ -384,15 +390,8 @@ else:
 				"CHARTS=[\"charts/alpha\"]",
 				"BEFORE="+strings.Repeat("0", 40),
 				"REPOSITORY=BlinkLabs-IO/Helm-Charts", "REGISTRY_USER=publisher",
-				"REGISTRY_TOKEN=fixture-token", "HELM_LOG="+log, "REMOTE_MODE="+tc.remote)
-			out, err := cmd.CombinedOutput()
-			if tc.wantError == "" {
-				if err != nil {
-					t.Fatalf("publish failed: %v\n%s", err, out)
-				}
-			} else if err == nil || !strings.Contains(string(out), tc.wantError) {
-				t.Fatalf("publish error = %v, want %q\n%s", err, tc.wantError, out)
-			}
+				"REGISTRY_TOKEN=fixture-token", "HELM_LOG="+log, "REMOTE_MODE="+tc.remote, "CHART_VERSION="+tc.version)
+			out, publishErr := cmd.CombinedOutput()
 			operations, err := os.ReadFile(log)
 			if err != nil {
 				t.Fatal(err)
@@ -400,6 +399,13 @@ else:
 			pushed := strings.Contains(string(operations), "push\n")
 			if pushed != tc.wantPush {
 				t.Fatalf("push = %v, want %v; operations: %s", pushed, tc.wantPush, operations)
+			}
+			if tc.wantError == "" {
+				if publishErr != nil {
+					t.Fatalf("publish failed: %v\n%s", publishErr, out)
+				}
+			} else if publishErr == nil || !strings.Contains(string(out), tc.wantError) {
+				t.Fatalf("publish error = %v, want %q\n%s", publishErr, tc.wantError, out)
 			}
 		})
 	}
