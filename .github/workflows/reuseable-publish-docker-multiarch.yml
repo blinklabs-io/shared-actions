@@ -69,6 +69,8 @@ concurrency:
 jobs:
   build-amd64:
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -141,16 +143,6 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      # Re-pull and re-push to ensure manifests are correctly submitted
-      # https://github.com/moby/buildkit/issues/1896
-      - name: pull-and-push
-        env:
-          TAGS: ${{ steps.meta.outputs.tags }}
-        run: |
-          for t in $TAGS; do
-            docker pull "$t" && docker push "$t"
-          done
-
       - name: Attest Docker Hub image (amd64)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2 https://github.com/actions/attest-build-provenance/releases/tag/v4.2.2
         with:
@@ -167,6 +159,8 @@ jobs:
 
   build-arm64:
     runs-on: ubuntu-24.04-arm
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -237,14 +231,6 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: pull-and-push
-        env:
-          TAGS: ${{ steps.meta.outputs.tags }}
-        run: |
-          for t in $TAGS; do
-            docker pull "$t" && docker push "$t"
-          done
-
       - name: Attest Docker Hub image (arm64)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2 https://github.com/actions/attest-build-provenance/releases/tag/v4.2.2
         with:
@@ -265,6 +251,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      AMD64_DIGEST: ${{ needs.build-amd64.outputs.digest }}
+      ARM64_DIGEST: ${{ needs.build-arm64.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 https://github.com/actions/checkout/releases/tag/v7.0.1
         with:
@@ -355,26 +344,33 @@ jobs:
         env:
           GHCR_TAGS: ${{ steps.meta-ghcr.outputs.tags }}
         run: |
+          if [[ ! "$AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           for t in $GHCR_TAGS; do
-            docker buildx imagetools create -t "${t}" "${t}-amd64" "${t}-arm64v8"
+            docker buildx imagetools create -t "${t}" "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
           done
 
       - name: manifest-ghcr-tags
         if: startsWith(github.ref, 'refs/tags/')
         env:
-          GHCR_IMAGE: ghcr.io/${{ inputs.ghcr-image }}
           GHCR_TAG_TAGS: ${{ steps.meta-ghcr-tag.outputs.tags }}
           RELEASE_TAG: ${{ github.ref_name }}
           IS_PRERELEASE: ${{ inputs.prerelease-pattern != '' && contains(github.ref, inputs.prerelease-pattern) }}
         run: |
+          if [[ ! "$AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           for t in $GHCR_TAG_TAGS; do
             if [[ "$IS_PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-              docker buildx imagetools create -t "${t}" "${t}-amd64" "${t}-arm64v8"
+              docker buildx imagetools create -t "${t}" "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
             else
               docker buildx imagetools create \
                 -t "${t}" \
-                -t "${GHCR_IMAGE}:latest" \
-                "${t}-amd64" "${t}-arm64v8"
+                -t "${t%:*}:latest" \
+                "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
             fi
           done
 
@@ -384,26 +380,33 @@ jobs:
         env:
           DH_TAGS: ${{ steps.meta-dockerhub.outputs.tags }}
         run: |
+          if [[ ! "$AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           for t in $DH_TAGS; do
-            docker buildx imagetools create -t "${t}" "${t}-amd64" "${t}-arm64v8"
+            docker buildx imagetools create -t "${t}" "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
           done
 
       - name: manifest-dockerhub-tags
         if: startsWith(github.ref, 'refs/tags/')
         env:
-          DOCKER_IMAGE: ${{ inputs.docker-image }}
           DH_TAG_TAGS: ${{ steps.meta-dockerhub-tag.outputs.tags }}
           RELEASE_TAG: ${{ github.ref_name }}
           IS_PRERELEASE: ${{ inputs.prerelease-pattern != '' && contains(github.ref, inputs.prerelease-pattern) }}
         run: |
+          if [[ ! "$AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           for t in $DH_TAG_TAGS; do
             if [[ "$IS_PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-              docker buildx imagetools create -t "${t}" "${t}-amd64" "${t}-arm64v8"
+              docker buildx imagetools create -t "${t}" "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
             else
               docker buildx imagetools create \
                 -t "${t}" \
-                -t "${DOCKER_IMAGE}:latest" \
-                "${t}-amd64" "${t}-arm64v8"
+                -t "${t%:*}:latest" \
+                "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
             fi
           done
 
@@ -418,7 +421,7 @@ jobs:
           short-description: ${{ inputs.description }}
 
   scan-images:
-    needs: [multi-arch-manifest]
+    needs: [multi-arch-manifest, build-amd64, build-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -429,9 +432,9 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            tag: amd64
+            digest: ${{ needs.build-amd64.outputs.digest }}
           - arch: arm64
-            tag: arm64v8
+            digest: ${{ needs.build-arm64.outputs.digest }}
     steps:
       - name: Login to GHCR
         if: inputs.enable-trivy-scan
@@ -440,31 +443,20 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        if: inputs.enable-trivy-scan
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ghcr.io/${{ inputs.ghcr-image }}
-          flavor: latest=false
-          tags: |
-            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
-            type=match,pattern=v(.*),group=1
-            type=ref,event=branch
-            type=semver,pattern={{version}}
       - name: Run Trivy vulnerability scanner (${{ matrix.arch }})
-        if: inputs.enable-trivy-scan && steps.meta.outputs.version != ''
+        if: inputs.enable-trivy-scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         env:
           TRIVY_PLATFORM: linux/${{ matrix.arch }}
         with:
           scan-type: image
-          scan-ref: ghcr.io/${{ inputs.ghcr-image }}:${{ steps.meta.outputs.version }}-${{ matrix.tag }}
+          scan-ref: ghcr.io/${{ inputs.ghcr-image }}@${{ matrix.digest }}
           format: sarif
           output: trivy-results-${{ matrix.arch }}.sarif
           ignore-unfixed: true
           severity: HIGH,CRITICAL
       - name: Upload Trivy scan results (${{ matrix.arch }})
-        if: always() && inputs.enable-trivy-scan && steps.meta.outputs.version != ''
+        if: always() && inputs.enable-trivy-scan
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy-results-${{ matrix.arch }}.sarif

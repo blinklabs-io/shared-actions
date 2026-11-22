@@ -80,7 +80,7 @@ func TestImageLatestAliasesRespectReleaseChannel(t *testing.T) {
 						}
 						cmd := exec.Command("bash", "-e", "-o", "pipefail", "-c", step.Run)
 						cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
-							"DOCKER_CALLS_FILE="+callsFile, "RELEASE_TAG="+test.tag, "PRERELEASE="+flag, "IS_PRERELEASE="+flag,
+							"DOCKER_CALLS_FILE="+callsFile, "AMD64_DIGEST=sha256:"+strings.Repeat("a", 64), "ARM64_DIGEST=sha256:"+strings.Repeat("b", 64), "RELEASE_TAG="+test.tag, "PRERELEASE="+flag, "IS_PRERELEASE="+flag,
 							"GHCR_IMAGE=ghcr.io/example/repo", "DOCKER_IMAGE=example/repo",
 							"GHCR_TAG_TAGS=ghcr.io/example/repo:"+strings.TrimPrefix(test.tag, "v"),
 							"DH_TAG_TAGS=example/repo:"+strings.TrimPrefix(test.tag, "v"))

@@ -189,8 +189,7 @@ func TestImageScanEnabled(t *testing.T) {
 	for _, s := range job.Steps {
 		if strings.Contains(s.Uses, "aquasecurity/trivy-action") {
 			sawTrivy = true
-			// The scan-ref must select a per-arch tag, not the merged manifest.
-			if strings.Contains(s.With["scan-ref"], "${{ matrix.arch }}") {
+			if s.With["scan-ref"] == "ghcr.io/${{ github.repository }}@${{ steps.image-digest.outputs.digest }}" {
 				archScanRef = true
 			}
 			// Trivy must scan this row's platform child; otherwise it defaults
@@ -207,7 +206,7 @@ func TestImageScanEnabled(t *testing.T) {
 		t.Error("scan-images does not run the Trivy scanner")
 	}
 	if !archScanRef {
-		t.Error("Trivy scan-ref must target the per-architecture image tag (…-${{ matrix.arch }}), not the merged manifest")
+		t.Error("Trivy scan-ref must target the immutable digest from the architecture build")
 	}
 	if !archPlatform {
 		t.Error("Trivy must set TRIVY_PLATFORM to linux/${{ matrix.arch }} so the arm64 scan resolves the arm64 child instead of Trivy's linux/amd64 default")

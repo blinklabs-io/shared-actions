@@ -12,12 +12,15 @@ import (
 
 type reusableWorkflowFile struct {
 	Jobs map[string]struct {
-		Needs    []string `yaml:"needs"`
+		Needs    []string          `yaml:"needs"`
+		Outputs  map[string]string `yaml:"outputs"`
+		Env      map[string]string `yaml:"env"`
 		Strategy struct {
 			MaxParallel string `yaml:"max-parallel"`
 		} `yaml:"strategy"`
 		Steps []struct {
 			Name string            `yaml:"name"`
+			ID   string            `yaml:"id"`
 			Run  string            `yaml:"run"`
 			Uses string            `yaml:"uses"`
 			Env  map[string]string `yaml:"env"`

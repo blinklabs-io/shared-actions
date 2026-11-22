@@ -329,6 +329,9 @@ jobs:
   build-image-amd64:
     if: inputs.publish-container-image
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      extra-digest: ${{ steps.push-extra.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -452,6 +455,9 @@ jobs:
   build-image-arm64:
     if: inputs.publish-container-image
     runs-on: ubuntu-24.04-arm
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      extra-digest: ${{ steps.push-extra.outputs.digest }}
     permissions:
       contents: read
       packages: write
@@ -579,6 +585,11 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      AMD64_DIGEST: ${{ needs.build-image-amd64.outputs.digest }}
+      ARM64_DIGEST: ${{ needs.build-image-arm64.outputs.digest }}
+      EXTRA_AMD64_DIGEST: ${{ needs.build-image-amd64.outputs.extra-digest }}
+      EXTRA_ARM64_DIGEST: ${{ needs.build-image-arm64.outputs.extra-digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 https://github.com/actions/checkout/releases/tag/v7.0.1
         with:
@@ -649,8 +660,12 @@ jobs:
         env:
           GHCR_TAGS: ${{ steps.meta-ghcr.outputs.tags }}
         run: |
+          if [[ ! "$AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           for t in $GHCR_TAGS; do
-            docker buildx imagetools create -t "${t}" "${t}-amd64" "${t}-arm64v8"
+            docker buildx imagetools create -t "${t}" "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
           done
       # On tag builds the version-tag manifest is already created by
       # manifest-ghcr above; here we only point :latest at the same images.
@@ -659,17 +674,20 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           PRERELEASE: ${{ inputs.prerelease }}
-          GHCR_IMAGE: ghcr.io/${{ github.repository }}
           GHCR_TAG_TAGS: ${{ steps.meta-ghcr-tag.outputs.tags }}
         run: |
+          if [[ ! "$AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           if [[ "$PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "Skipping latest for a prerelease or non-version tag"
             exit 0
           fi
           for t in $GHCR_TAG_TAGS; do
             docker buildx imagetools create \
-              -t "${GHCR_IMAGE}:latest" \
-              "${t}-amd64" "${t}-arm64v8"
+              -t "${t%:*}:latest" \
+              "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
           done
 
       # Create and push manifests to Docker Hub (skipped when docker-image empty).
@@ -678,8 +696,12 @@ jobs:
         env:
           DH_TAGS: ${{ steps.meta-dockerhub.outputs.tags }}
         run: |
+          if [[ ! "$AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           for t in $DH_TAGS; do
-            docker buildx imagetools create -t "${t}" "${t}-amd64" "${t}-arm64v8"
+            docker buildx imagetools create -t "${t}" "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
           done
       # On tag builds the version-tag manifest is already created by
       # manifest-dockerhub above; here we only point :latest at the same images.
@@ -688,17 +710,20 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
           PRERELEASE: ${{ inputs.prerelease }}
-          DOCKER_IMAGE: ${{ inputs.docker-image }}
           DH_TAG_TAGS: ${{ steps.meta-dockerhub-tag.outputs.tags }}
         run: |
+          if [[ ! "$AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           if [[ "$PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
             echo "Skipping latest for a prerelease or non-version tag"
             exit 0
           fi
           for t in $DH_TAG_TAGS; do
             docker buildx imagetools create \
-              -t "${DOCKER_IMAGE}:latest" \
-              "${t}-amd64" "${t}-arm64v8"
+              -t "${t%:*}:latest" \
+              "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
           done
 
       # The extra variant is published per architecture only; stitch it into
@@ -709,9 +734,13 @@ jobs:
           GHCR_TAGS: ${{ steps.meta-ghcr.outputs.tags }}
           EXTRA_SUFFIX: ${{ inputs.extra-image-suffix }}
         run: |
+          if [[ ! "$EXTRA_AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$EXTRA_ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           for t in $GHCR_TAGS; do
             docker buildx imagetools create -t "${t}-${EXTRA_SUFFIX}" \
-              "${t}-${EXTRA_SUFFIX}-amd64" "${t}-${EXTRA_SUFFIX}-arm64v8"
+              "${t%:*}@${EXTRA_AMD64_DIGEST}" "${t%:*}@${EXTRA_ARM64_DIGEST}"
           done
       - name: manifest-dockerhub-extra
         if: inputs.extra-image-target != '' && inputs.docker-image != ''
@@ -719,9 +748,13 @@ jobs:
           DH_TAGS: ${{ steps.meta-dockerhub.outputs.tags }}
           EXTRA_SUFFIX: ${{ inputs.extra-image-suffix }}
         run: |
+          if [[ ! "$EXTRA_AMD64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ || ! "$EXTRA_ARM64_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "ERROR: Missing or invalid build digests"
+            exit 1
+          fi
           for t in $DH_TAGS; do
             docker buildx imagetools create -t "${t}-${EXTRA_SUFFIX}" \
-              "${t}-${EXTRA_SUFFIX}-amd64" "${t}-${EXTRA_SUFFIX}-arm64v8"
+              "${t%:*}@${EXTRA_AMD64_DIGEST}" "${t%:*}@${EXTRA_ARM64_DIGEST}"
           done
 
       - name: Update Docker Hub description

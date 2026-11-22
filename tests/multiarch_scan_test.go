@@ -2,7 +2,6 @@ package workflows
 
 import (
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -20,7 +19,7 @@ func TestMultiarchScanCoversBothPublishedArchitectures(t *testing.T) {
 		Jobs map[string]struct {
 			Strategy struct {
 				Matrix struct {
-					Include []struct{ Arch, Tag string }
+					Include []struct{ Arch, Digest string }
 				}
 			}
 		}
@@ -32,11 +31,8 @@ func TestMultiarchScanCoversBothPublishedArchitectures(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("scan matrix=%v, want two published architectures", rows)
 	}
-	var scanRef, platform, report, uploaded, category, tags string
+	var scanRef, platform, report, uploaded, category string
 	for _, step := range job.Steps {
-		if strings.HasPrefix(step.Uses, "docker/metadata-action@") {
-			tags = step.With["tags"]
-		}
 		if strings.HasPrefix(step.Uses, "aquasecurity/trivy-action@") {
 			scanRef, platform, report = step.With["scan-ref"], step.Env["TRIVY_PLATFORM"], step.With["output"]
 		}
@@ -44,36 +40,27 @@ func TestMultiarchScanCoversBothPublishedArchitectures(t *testing.T) {
 			uploaded, category = step.With["sarif_file"], step.With["category"]
 		}
 	}
-	customTag := false
-	for _, line := range strings.Split(tags, "\n") {
-		fields := strings.Split(strings.TrimSpace(line), ",")
-		if fields[0] != "type=match" {
-			continue
-		}
-		for _, field := range fields {
-			if strings.HasPrefix(field, "pattern=") {
-				match := regexp.MustCompile(strings.TrimPrefix(field, "pattern=")).FindStringSubmatch("vnightly")
-				customTag = customTag || (len(match) > 1 && match[1] == "nightly")
-			}
-		}
-	}
-	if !customTag {
-		t.Fatal("scan metadata cannot select the published vnightly image")
-	}
 	seen := map[string]bool{}
 	for _, row := range rows {
-		expand := strings.NewReplacer("${{ matrix.arch }}", row.Arch, "${{ matrix.tag }}", row.Tag).Replace
-		wantTag := map[string]string{"amd64": "amd64", "arm64": "arm64v8"}[row.Arch]
-		if wantTag == "" || row.Tag != wantTag || seen[row.Arch] {
+		build := map[string]string{"amd64": "build-amd64", "arm64": "build-arm64"}[row.Arch]
+		if build == "" || row.Digest != "${{ needs."+build+".outputs.digest }}" || seen[row.Arch] {
 			t.Fatalf("unexpected scan row=%+v", row)
 		}
+		if wf.Jobs[build].Outputs["digest"] != "${{ steps.push.outputs.digest }}" {
+			t.Fatalf("%s does not export its actual build digest", build)
+		}
 		seen[row.Arch] = true
-		if expand(platform) != "linux/"+row.Arch || !strings.HasSuffix(expand(scanRef), ":${{ steps.meta.outputs.version }}-"+wantTag) {
+		digest := "sha256:" + strings.Repeat(map[string]string{"amd64": "a", "arm64": "b"}[row.Arch], 64)
+		expand := strings.NewReplacer("${{ matrix.arch }}", row.Arch, "${{ matrix.digest }}", digest).Replace
+		if expand(platform) != "linux/"+row.Arch || expand(scanRef) != "ghcr.io/${{ inputs.ghcr-image }}@"+digest {
 			t.Fatalf("%s scan resolves wrong image/platform: %s %s", row.Arch, expand(scanRef), expand(platform))
 		}
 		if expand(report) != "trivy-results-"+row.Arch+".sarif" || expand(uploaded) != expand(report) || expand(category) != "trivy-"+row.Arch {
 			t.Fatalf("%s report upload is missing or overwrites another architecture", row.Arch)
 		}
+	}
+	if strings.Join(job.Needs, ",") != "multi-arch-manifest,build-amd64,build-arm64" {
+		t.Fatalf("scan cannot access the build digests: %v", job.Needs)
 	}
 	dependencies := strings.Join(wf.Jobs["github-release"].Needs, ",")
 	if dependencies != "multi-arch-manifest,scan-images" {

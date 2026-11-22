@@ -726,6 +726,23 @@ jobs:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+      - name: Record image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.push.outputs.digest }}
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Missing or invalid image digest for $IMAGE_ARCH" >&2
+            exit 1
+          fi
+          printf '%s\n' "$IMAGE_DIGEST" > "$RUNNER_TEMP/$IMAGE_ARCH.digest"
+      - name: Upload image digest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-image-digest-${{ inputs.application-name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/${{ matrix.arch }}.digest
+          if-no-files-found: error
+          overwrite: true
 
   build-image-manifest:
     needs: [build-images]
@@ -763,12 +780,35 @@ jobs:
             type=ref,event=branch
             # semver
             type=semver,pattern={{version}}
+      - name: Download image digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-image-digest-${{ inputs.application-name }}-*
+          path: ${{ runner.temp }}/desktop-image-digests
+          merge-multiple: true
       - name: manifest-create
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
+          set -euo pipefail
+          digest_dir="$RUNNER_TEMP/desktop-image-digests"
+          for arch in amd64 arm64; do
+            if [[ ! -f "$digest_dir/$arch.digest" ]]; then
+              echo "Missing image digest for $arch" >&2
+              exit 1
+            fi
+            digest=$(< "$digest_dir/$arch.digest")
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Invalid image digest for $arch" >&2
+              exit 1
+            fi
+          done
+          amd64_digest=$(< "$digest_dir/amd64.digest")
+          arm64_digest=$(< "$digest_dir/arm64.digest")
+
+          # Immutable build digests prevent concurrent runs from mixing sources.
           # `docker buildx imagetools create` copies the complete source OCI
-          # index for each arch tag — the platform image AND its
+          # index for each architecture — the platform image AND its
           # build-provenance / SBOM attestation descriptors — into the merged
           # manifest. Plain `docker manifest create` instead rejects those
           # `unknown/unknown` attestation entries with "must have an OS and
@@ -777,7 +817,8 @@ jobs:
           # Word-splitting of the env-sourced tag list is intentional.
           # shellcheck disable=SC2086
           for t in ${TAGS}; do
-            docker buildx imagetools create -t "${t}" "${t}-amd64" "${t}-arm64"
+            image="${t%:*}"
+            docker buildx imagetools create -t "$t" "$image@$amd64_digest" "$image@$arm64_digest"
           done
       # Checkout repo so README.md is available for next step
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 https://github.com/actions/checkout/releases/tag/v7.0.1
@@ -828,41 +869,39 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
           registry: ghcr.io
-      - id: meta
+      - name: Download image digest
         if: inputs.enable-trivy-scan
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0 https://github.com/docker/metadata-action/releases/tag/v6.2.0
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          images: ghcr.io/${{ github.repository }}
-          flavor: |
-            latest=false
-          tags: |
-            # Only version, no revision
-            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1
-            # branch
-            type=ref,event=branch
-            # semver
-            type=semver,pattern={{version}}
+          name: desktop-image-digest-${{ inputs.application-name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/desktop-image-digests
+      - name: Read image digest
+        id: image-digest
+        if: inputs.enable-trivy-scan
+        env:
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          path="$RUNNER_TEMP/desktop-image-digests/$IMAGE_ARCH.digest"
+          if [[ ! -f "$path" ]]; then
+            echo "Missing image digest for $IMAGE_ARCH" >&2
+            exit 1
+          fi
+          digest=$(< "$path")
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Invalid image digest for $IMAGE_ARCH" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
       - name: Run Trivy vulnerability scanner (${{ matrix.arch }})
-        # Only scan when enabled and a concrete image version was resolved. On
-        # plain branch pushes docker/metadata-action can leave `version` empty,
-        # which would make scan-ref tagless and fail Trivy — failing an
-        # otherwise-successful publish. Skipping keeps the scan on-by-default for
-        # releases without breaking branch publishes. The per-arch tag (…-amd64 /
-        # …-arm64) is the single-platform image build-images pushed, so the scan
-        # targets that architecture's real filesystem regardless of the runner.
-        if: inputs.enable-trivy-scan && steps.meta.outputs.version != ''
+        if: inputs.enable-trivy-scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 https://github.com/aquasecurity/trivy-action/releases/tag/v0.36.0
         env:
-          # The per-arch tag (…-amd64 / …-arm64) is a single-platform OCI index.
-          # Without an explicit platform Trivy defaults to linux/amd64 when
-          # resolving the remote index, so on the arm64 runner it fails with
-          # "no child with platform linux/amd64 in index …-arm64". Pin the
-          # platform to this matrix row's architecture so Trivy resolves the
-          # matching child regardless of the runner's default.
+          # The digest resolves to an OCI index containing the platform image
+          # and attestations. Pin the architecture of the platform child.
           TRIVY_PLATFORM: 'linux/${{ matrix.arch }}'
         with:
           scan-type: 'image'
-          scan-ref: 'ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}-${{ matrix.arch }}'
+          scan-ref: 'ghcr.io/${{ github.repository }}@${{ steps.image-digest.outputs.digest }}'
           format: 'sarif'
           output: 'trivy-results-${{ matrix.arch }}.sarif'
           ignore-unfixed: true
@@ -870,7 +909,7 @@ jobs:
       - name: Upload Trivy scan results to GitHub Security tab (${{ matrix.arch }})
         # Distinct category per arch: upload-sarif keys results by category, so a
         # shared category would let the arm64 upload overwrite the amd64 one.
-        if: always() && inputs.enable-trivy-scan && steps.meta.outputs.version != ''
+        if: always() && inputs.enable-trivy-scan
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3 https://github.com/github/codeql-action/releases/tag/codeql-bundle-v4.39.3
         with:
           sarif_file: 'trivy-results-${{ matrix.arch }}.sarif'
