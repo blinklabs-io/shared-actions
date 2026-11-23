@@ -29,15 +29,42 @@ func TestImageMetadataPreservesPrereleaseSuffix(t *testing.T) {
 				if len(rules) == 0 {
 					continue
 				}
-				for _, tag := range []string{"v1.2.3-rc1", "v1.2.3-beta.2", "v1.2.3-5-rc1", "v1.2.3-5"} {
+				tests := []struct {
+					tag, stable string
+					wantAlias   bool
+				}{
+					{tag: "v1.2.3-rc1", stable: "1.2.3"},
+					{tag: "v1.2.3-beta.2", stable: "1.2.3"},
+					{tag: "v1.2.3-5-rc1", stable: "1.2.3"},
+					{tag: "v1.2.3-5", stable: "1.2.3", wantAlias: true},
+				}
+				if file == "reuseable-publish-docker-multiarch.yml" {
+					tests = append(tests, []struct {
+						tag, stable string
+						wantAlias   bool
+					}{
+						{tag: "v13.5.0.1-1", stable: "13.5.0.1", wantAlias: true},
+						{tag: "v13.5.0.1-rc1", stable: "13.5.0.1"},
+						{tag: "v13.5.0.1-1-rc1", stable: "13.5.0.1"},
+						{tag: "v20261123-1", stable: "20261123", wantAlias: true},
+						{tag: "v20261123-12", stable: "20261123", wantAlias: true},
+						{tag: "v20261123-123", stable: "20261123", wantAlias: true},
+						{tag: "v20261123-rc1", stable: "20261123"},
+						{tag: "v20261123-1-rc1", stable: "20261123"},
+						{tag: "v2026112-1", stable: "2026112"},
+						{tag: "v202611234-1", stable: "202611234"},
+					}...)
+				}
+				for _, test := range tests {
+					tag := test.tag
 					alias := false
 					for _, re := range rules {
 						match := re.FindStringSubmatch(tag)
-						if len(match) >= 2 && match[1] == "1.2.3" {
+						if len(match) >= 2 && match[1] == test.stable {
 							alias = true
 						}
 					}
-					if want := tag == "v1.2.3-5"; alias != want {
+					if want := test.wantAlias; alias != want {
 						t.Errorf("%s/%s step %d stable alias for %s=%v want=%v", file, jobName, index, tag, alias, want)
 					}
 				}
@@ -58,6 +85,7 @@ func TestImageLatestAliasesRespectReleaseChannel(t *testing.T) {
 					tag        string
 					prerelease bool
 					wantLatest bool
+					dockerOnly bool
 				}{
 					{tag: "v1.2.3", wantLatest: true},
 					{tag: "v1.2.3-5", wantLatest: true},
@@ -67,7 +95,23 @@ func TestImageLatestAliasesRespectReleaseChannel(t *testing.T) {
 					{tag: "v1.2.3", prerelease: true},
 					{tag: "v1.2.3-5", prerelease: true},
 					{tag: "nightly"},
+					{tag: "v13.5.0.1", wantLatest: true, dockerOnly: true},
+					{tag: "v13.5.0.1-1", wantLatest: true, dockerOnly: true},
+					{tag: "v13.5.0.1-1", prerelease: true, dockerOnly: true},
+					{tag: "v13.5.0.1-rc1", dockerOnly: true},
+					{tag: "v13.5.0.1-1-rc1", dockerOnly: true},
+					{tag: "v20261123-1", wantLatest: true, dockerOnly: true},
+					{tag: "v20261123-12", wantLatest: true, dockerOnly: true},
+					{tag: "v20261123-123", wantLatest: true, dockerOnly: true},
+					{tag: "v20261123-1", prerelease: true, dockerOnly: true},
+					{tag: "v20261123-rc1", dockerOnly: true},
+					{tag: "v20261123-1-rc1", dockerOnly: true},
+					{tag: "v2026112-1", dockerOnly: true},
+					{tag: "v202611234-1", dockerOnly: true},
 				} {
+					if test.dockerOnly && file != "reuseable-publish-docker-multiarch.yml" {
+						continue
+					}
 					t.Run(file+"/"+step.Name+"/"+test.tag+"/"+map[bool]string{true: "prerelease", false: "default"}[test.prerelease], func(t *testing.T) {
 						dir := t.TempDir()
 						callsFile := filepath.Join(dir, "calls")
