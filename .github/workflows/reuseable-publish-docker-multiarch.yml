@@ -115,7 +115,7 @@ jobs:
             suffix=-amd64
           tags: |
             # Only version, no revision
-            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
+            type=match,pattern=^v([0-9]{8}|[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Full version, with revision
             type=match,pattern=v(.*),group=1
             # branch
@@ -205,7 +205,7 @@ jobs:
             suffix=-arm64v8
           tags: |
             # Only version, no revision
-            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
+            type=match,pattern=^v([0-9]{8}|[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Full version, with revision
             type=match,pattern=v(.*),group=1
             # branch
@@ -284,7 +284,7 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
+            type=match,pattern=^v([0-9]{8}|[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Full version, with revision
             type=match,pattern=v(.*),group=1
             # branch
@@ -301,7 +301,8 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
+            type=match,pattern=^v([0-9]{8}|[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Plain semver tag (no revision suffix, e.g. v1.2.3)
             type=semver,pattern={{version}}
 
@@ -314,7 +315,7 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
+            type=match,pattern=^v([0-9]{8}|[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Full version, with revision
             type=match,pattern=v(.*),group=1
             # branch
@@ -331,7 +332,8 @@ jobs:
             latest=false
           tags: |
             # Only version, no revision
-            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
+            type=match,pattern=^v([0-9]{8}|[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?)-[0-9]+$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
+            type=match,pattern=^v([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)$,group=1,enable=${{ inputs.prerelease-pattern == '' || !contains(github.ref, inputs.prerelease-pattern) }}
             # Plain semver tag (no revision suffix, e.g. v1.2.3)
             type=semver,pattern={{version}}
 
@@ -364,7 +366,7 @@ jobs:
             exit 1
           fi
           for t in $GHCR_TAG_TAGS; do
-            if [[ "$IS_PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            if [[ "$IS_PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9]+)?(\+[0-9A-Za-z.-]+)?|[0-9]{8}-[0-9]+)$ ]]; then
               docker buildx imagetools create -t "${t}" "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
             else
               docker buildx imagetools create \
@@ -400,7 +402,7 @@ jobs:
             exit 1
           fi
           for t in $DH_TAG_TAGS; do
-            if [[ "$IS_PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            if [[ "$IS_PRERELEASE" == true || ! "$RELEASE_TAG" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9]+)?(\+[0-9A-Za-z.-]+)?|[0-9]{8}-[0-9]+)$ ]]; then
               docker buildx imagetools create -t "${t}" "${t%:*}@${AMD64_DIGEST}" "${t%:*}@${ARM64_DIGEST}"
             else
               docker buildx imagetools create \
