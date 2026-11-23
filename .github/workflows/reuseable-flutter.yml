@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: "stable"
+      java-version:
+        description: Installed Java major version for APK builds; empty preserves Flutter's default JDK selection.
+        required: false
+        type: string
+        default: ""
       run-analyze:
         description: Run `flutter analyze`.
         required: false
@@ -61,6 +66,24 @@ jobs:
         with:
           flutter-version: ${{ inputs.flutter-version }}
           channel: ${{ inputs.channel }}
+
+      - name: Select Java for APK build
+        if: ${{ inputs.build-apk && inputs.java-version != '' }}
+        env:
+          JAVA_VERSION: ${{ inputs.java-version }}
+        shell: bash
+        run: |
+          if [[ ! "$JAVA_VERSION" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Java version must be a positive major version" >&2
+            exit 1
+          fi
+          jdk_variable="JAVA_HOME_${JAVA_VERSION}_X64"
+          jdk="${!jdk_variable:-}"
+          if [[ -z "$jdk" || ! -x "$jdk/bin/java" ]]; then
+            echo "Requested Java runtime is not installed" >&2
+            exit 1
+          fi
+          flutter config --jdk-dir "$jdk"
 
       - name: Install dependencies
         run: flutter pub get
