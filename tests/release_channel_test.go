@@ -95,7 +95,6 @@ func TestImageLatestAliasesRespectReleaseChannel(t *testing.T) {
 					{tag: "v1.2.3", prerelease: true},
 					{tag: "v1.2.3-5", prerelease: true},
 					{tag: "nightly"},
-					{tag: "v13.5.0.1", wantLatest: true, dockerOnly: true},
 					{tag: "v13.5.0.1-1", wantLatest: true, dockerOnly: true},
 					{tag: "v13.5.0.1-1", prerelease: true, dockerOnly: true},
 					{tag: "v13.5.0.1-rc1", dockerOnly: true},
@@ -122,12 +121,44 @@ func TestImageLatestAliasesRespectReleaseChannel(t *testing.T) {
 						if test.prerelease {
 							flag = "true"
 						}
+						ghcrTags := "ghcr.io/example/repo:" + strings.TrimPrefix(test.tag, "v")
+						dockerTags := "example/repo:" + strings.TrimPrefix(test.tag, "v")
+						// These revision formats are not SemVer; only match rules can emit their tags.
+						if test.dockerOnly {
+							metadataTags := func(id, image string) string {
+								for _, metadata := range job.Steps {
+									if metadata.ID != id {
+										continue
+									}
+									var tags []string
+									for _, line := range strings.Split(metadata.With["tags"], "\n") {
+										fields := strings.Split(strings.TrimSpace(line), ",")
+										if fields[0] != "type=match" || test.prerelease {
+											continue
+										}
+										for _, field := range fields {
+											if strings.HasPrefix(field, "pattern=") {
+												match := regexp.MustCompile(strings.TrimPrefix(field, "pattern=")).FindStringSubmatch(test.tag)
+												if len(match) >= 2 {
+													tags = append(tags, image+":"+match[1])
+												}
+											}
+										}
+									}
+									return strings.Join(tags, "\n")
+								}
+								t.Fatalf("missing tag metadata step %s", id)
+								return ""
+							}
+							ghcrTags = metadataTags("meta-ghcr-tag", "ghcr.io/example/repo")
+							dockerTags = metadataTags("meta-dockerhub-tag", "example/repo")
+						}
 						cmd := exec.Command("bash", "-e", "-o", "pipefail", "-c", step.Run)
 						cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
 							"DOCKER_CALLS_FILE="+callsFile, "AMD64_DIGEST=sha256:"+strings.Repeat("a", 64), "ARM64_DIGEST=sha256:"+strings.Repeat("b", 64), "RELEASE_TAG="+test.tag, "PRERELEASE="+flag, "IS_PRERELEASE="+flag,
 							"GHCR_IMAGE=ghcr.io/example/repo", "DOCKER_IMAGE=example/repo",
-							"GHCR_TAG_TAGS=ghcr.io/example/repo:"+strings.TrimPrefix(test.tag, "v"),
-							"DH_TAG_TAGS=example/repo:"+strings.TrimPrefix(test.tag, "v"))
+							"GHCR_TAG_TAGS="+ghcrTags,
+							"DH_TAG_TAGS="+dockerTags)
 						if out, err := cmd.CombinedOutput(); err != nil {
 							t.Fatalf("manifest step failed: %v\n%s", err, out)
 						}
