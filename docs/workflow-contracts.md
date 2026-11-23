@@ -1,5 +1,14 @@
 # Release and Helm requirements
 
+## Flutter APK builds
+
+The [Flutter workflow](../.github/workflows/reuseable-flutter.yml) accepts an
+optional `java-version` major version for APK builds, such as `"17"`. It selects
+that JDK from the runner's installed `JAVA_HOME_<major>_X64` runtime and configures
+Flutter to use it before building. An invalid or unavailable runtime fails the
+job. Leaving the input empty preserves Flutter's existing JDK selection;
+non-APK jobs do not select Java. The workflow does not upgrade Flutter or Gradle.
+
 ## Binary releases
 
 The [binary publisher](../.github/workflows/reuseable-publish.yml) reuses only a
