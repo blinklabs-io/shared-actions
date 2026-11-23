@@ -43,6 +43,7 @@ func TestImageMetadataPreservesPrereleaseSuffix(t *testing.T) {
 						tag, stable string
 						wantAlias   bool
 					}{
+						{tag: "v13.5.0.1", stable: "13.5.0.1", wantAlias: true},
 						{tag: "v13.5.0.1-1", stable: "13.5.0.1", wantAlias: true},
 						{tag: "v13.5.0.1-rc1", stable: "13.5.0.1"},
 						{tag: "v13.5.0.1-1-rc1", stable: "13.5.0.1"},
@@ -95,6 +96,8 @@ func TestImageLatestAliasesRespectReleaseChannel(t *testing.T) {
 					{tag: "v1.2.3", prerelease: true},
 					{tag: "v1.2.3-5", prerelease: true},
 					{tag: "nightly"},
+					{tag: "v13.5.0.1", wantLatest: true, dockerOnly: true},
+					{tag: "v13.5.0.1", prerelease: true, dockerOnly: true},
 					{tag: "v13.5.0.1-1", wantLatest: true, dockerOnly: true},
 					{tag: "v13.5.0.1-1", prerelease: true, dockerOnly: true},
 					{tag: "v13.5.0.1-rc1", dockerOnly: true},
@@ -123,7 +126,7 @@ func TestImageLatestAliasesRespectReleaseChannel(t *testing.T) {
 						}
 						ghcrTags := "ghcr.io/example/repo:" + strings.TrimPrefix(test.tag, "v")
 						dockerTags := "example/repo:" + strings.TrimPrefix(test.tag, "v")
-						// These revision formats are not SemVer; only match rules can emit their tags.
+						// These date and four-component formats are not SemVer; only match rules can emit their tags.
 						if test.dockerOnly {
 							metadataTags := func(id, image string) string {
 								for _, metadata := range job.Steps {
