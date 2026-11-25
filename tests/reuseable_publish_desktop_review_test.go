@@ -362,8 +362,17 @@ func TestWindowsReleaseSigningOrder(t *testing.T) {
 		if strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(step.If, "${{"), "}}")) != gate {
 			t.Fatalf("%s has unexpected release gate %q", step.Name, step.If)
 		}
+		if step.Name == "Sign Windows binaries" || step.Name == "Sign Windows MSI" {
+			if step.With["store-type"] != "${{ secrets.certificate-store-type || 'GOOGLECLOUD' }}" {
+				t.Fatalf("%s must forward the caller's keystore type", step.Name)
+			}
+		}
 		switch step.Name {
 		case "Sign Windows binaries":
+			wantFiles := "${{ inputs.application-name }}.exe\n${{ matrix.tray && format('{0}-tray.exe', inputs.application-name) || '' }}\n"
+			if step.With["files"] != wantFiles {
+				t.Fatalf("unexpected signing payloads: %q", step.With["files"])
+			}
 			signer = step.Uses
 			if !strings.HasPrefix(signer, "blinklabs-io/shared-actions/sign-windows@") {
 				t.Fatalf("unexpected Windows signer %q", signer)
