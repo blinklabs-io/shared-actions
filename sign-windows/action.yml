@@ -2,7 +2,7 @@ name: Sign Windows artifacts
 description: Sign Windows release files with Google Cloud KMS and verify their Authenticode signatures and timestamps.
 inputs:
   files:
-    description: One relative artifact path per line inside the checked-out workspace.
+    description: One unsigned artifact’s relative path per line inside the checked-out workspace.
     required: true
   certificate-chain:
     description: Base64-encoded PEM certificate chain for the signing key.

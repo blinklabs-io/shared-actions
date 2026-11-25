@@ -38,6 +38,11 @@ try {
     Write-Host "::add-mask::$token"
     $env:JSIGN_STOREPASS = $token
     foreach ($file in $files) {
+        # An existing embedded or catalog signature can mask the signature jsign adds.
+        $prior = Get-AuthenticodeSignature -LiteralPath $file.FullName -ErrorAction Stop
+        if ($prior.Status -ne 'NotSigned' -or $null -ne $prior.SignerCertificate) {
+            throw "Expected an unsigned artifact: $($file.Name)"
+        }
         $options = @(
             '--storetype', 'GOOGLECLOUD', '--storepass', 'env:JSIGN_STOREPASS',
             '--keystore', $env:SIGN_KEYSTORE, '--alias', $env:SIGN_KEY_NAME,

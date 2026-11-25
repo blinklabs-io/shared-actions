@@ -13,13 +13,15 @@ function java {
 }
 function Get-AuthenticodeSignature {
     param($LiteralPath, $ErrorAction)
+    if (-not $signed.Contains($LiteralPath)) {
+        return @{ Status = $priorStatus; SignerCertificate = $null }
+    }
     $verified.Add($LiteralPath)
-    return @{ Status = 'Valid'; TimeStamperCertificate = $tsa }
+    return @{ Status = 'Valid'; SignatureType = 'Authenticode'; TimeStamperCertificate = $tsa }
 }
 try {
     $env:GITHUB_WORKSPACE = $root.FullName + [IO.Path]::DirectorySeparatorChar
     $env:RUNNER_TEMP = (New-Item -ItemType Directory -Path (Join-Path $root 'temp')).FullName
-    $env:SIGN_FILES = "app.exe`nproduct.msi"
     $env:CERTIFICATE_CHAIN = 'Y2VydA=='
     $env:SIGN_KEYSTORE = 'fixture-store'
     $env:SIGN_KEY_NAME = 'fixture-alias'
@@ -29,9 +31,13 @@ try {
     foreach ($name in 'app.exe','product.msi') { Set-Content -LiteralPath (Join-Path $root $name) -Value 'fixture' }
     foreach ($test in @(
         @{ Java = 0; Timestamp = 'TSA'; Error = ''; Signed = 2; Verified = 2 }
+        @{ Files = "app.exe`napp.exe"; Java = 0; Timestamp = 'TSA'; Error = 'Expected an unsigned artifact'; Signed = 1; Verified = 2 }
+        @{ Prior = 'Valid'; Java = 0; Timestamp = 'TSA'; Error = 'Expected an unsigned artifact'; Signed = 0; Verified = 0 }
         @{ Java = 1; Timestamp = 'TSA'; Error = 'jsign failed'; Signed = 1; Verified = 0 }
         @{ Java = 0; Timestamp = $null; Error = 'Missing Authenticode timestamp'; Signed = 1; Verified = 1 }
     )) {
+        $env:SIGN_FILES = if ($test.Files) { $test.Files } else { "app.exe`nproduct.msi" }
+        $priorStatus = if ($test.Prior) { $test.Prior } else { 'NotSigned' }
         $signed = [Collections.Generic.List[string]]::new()
         $verified = [Collections.Generic.List[string]]::new()
         $javaStatus = $test.Java
