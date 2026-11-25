@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -19,6 +20,7 @@ func TestWindowsSigningStoreTypeContract(t *testing.T) {
 		Runs struct {
 			Steps []struct {
 				Env map[string]string `yaml:"env"`
+				Run string            `yaml:"run"`
 			} `yaml:"steps"`
 		} `yaml:"runs"`
 	}
@@ -30,8 +32,8 @@ func TestWindowsSigningStoreTypeContract(t *testing.T) {
 	}
 	var got string
 	for _, step := range action.Runs.Steps {
-		if value, ok := step.Env["SIGN_STORE_TYPE"]; ok {
-			got = value
+		if strings.Contains(step.Run, "sign.ps1") {
+			got = step.Env["SIGN_STORE_TYPE"]
 		}
 	}
 	if got != "${{ inputs.store-type }}" {
