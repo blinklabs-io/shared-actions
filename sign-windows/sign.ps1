@@ -44,7 +44,7 @@ try {
             throw "Expected an unsigned artifact: $($file.Name)"
         }
         $options = @(
-            '--storetype', 'GOOGLECLOUD', '--storepass', 'env:JSIGN_STOREPASS',
+            '--storetype', $env:SIGN_STORE_TYPE, '--storepass', 'env:JSIGN_STOREPASS',
             '--keystore', $env:SIGN_KEYSTORE, '--alias', $env:SIGN_KEY_NAME,
             '--certfile', $chain, '--alg', 'SHA-256',
             '--tsmode', 'RFC3161', '--tsaurl', $env:TSA_URL,

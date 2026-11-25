@@ -5,9 +5,15 @@ function Invoke-WebRequest { param($Uri, $OutFile) Set-Content -LiteralPath $Out
 function Get-FileHash { param($LiteralPath, $Algorithm) @{ Hash = $digest } }
 function gcloud { $global:LASTEXITCODE = 0; 'fixture-token' }
 function java {
+    $typeIndex = [Array]::IndexOf($args, '--storetype')
+    if ($typeIndex -lt 0 -or $args[$typeIndex + 1] -ne $env:SIGN_STORE_TYPE) {
+        throw 'The caller keystore type did not reach jsign.'
+    }
     if ($args -notcontains 'env:JSIGN_STOREPASS' -or $args -contains 'fixture-token' -or $args -notcontains 'RFC3161') {
         throw 'Unexpected jsign arguments.'
     }
+    $index = [Array]::IndexOf($args, '--storetype')
+    if ($index -lt 0 -or $args[$index + 1] -ne $env:SIGN_STORE_TYPE) { throw 'Unexpected jsign store type.' }
     $signed.Add($args[-1])
     $global:LASTEXITCODE = $javaStatus
 }
@@ -33,6 +39,7 @@ try {
     Set-Content -LiteralPath (Join-Path $target 'app.exe') -Value 'fixture'
     $null = New-Item -ItemType Junction -Path (Join-Path $root 'junction') -Target $target.FullName
     foreach ($test in @(
+        @{ StoreType = 'fixture-store-type'; Java = 0; Timestamp = 'TSA'; Error = ''; Signed = 2; Verified = 2 }
         @{ WrongDigest = $true; Error = 'jsign checksum mismatch'; Signed = 0; Verified = 0 }
         @{ Files = (Join-Path $root 'app.exe'); Error = 'Signing paths must be relative'; Signed = 0; Verified = 0 }
         @{ Files = 'target/../app.exe'; Error = 'Signing paths must be relative'; Signed = 0; Verified = 0 }
@@ -43,6 +50,7 @@ try {
         @{ Java = 1; Timestamp = 'TSA'; Error = 'jsign failed'; Signed = 1; Verified = 0 }
         @{ Java = 0; Timestamp = $null; Error = 'Missing Authenticode timestamp'; Signed = 1; Verified = 1 }
     )) {
+        $env:SIGN_STORE_TYPE = if ($test.StoreType) { $test.StoreType } else { 'GOOGLECLOUD' }
         $env:SIGN_FILES = if ($test.Files) { $test.Files } else { "app.exe`nproduct.msi" }
         $digest = if ($test.WrongDigest) { '0' * 64 } else { '05ca18d4ab7b8c2183289b5378d32860f0ea0f3bdab1f1b8cae5894fb225fa8a' }
         $priorStatus = if ($test.Prior) { $test.Prior } else { 'NotSigned' }

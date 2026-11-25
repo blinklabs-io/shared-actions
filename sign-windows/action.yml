@@ -7,6 +7,9 @@ inputs:
   certificate-chain:
     description: Base64-encoded PEM certificate chain for the signing key.
     required: true
+  store-type:
+    description: jsign keystore type for the caller's signing key.
+    default: GOOGLECLOUD
   keystore:
     description: Google Cloud KMS keyring used by jsign.
     required: true
@@ -30,6 +33,7 @@ runs:
       env:
         SIGN_FILES: ${{ inputs.files }}
         CERTIFICATE_CHAIN: ${{ inputs.certificate-chain }}
+        SIGN_STORE_TYPE: ${{ inputs.store-type }}
         SIGN_KEYSTORE: ${{ inputs.keystore }}
         SIGN_KEY_NAME: ${{ inputs.key-name }}
         SIGN_NAME: ${{ inputs.application-name }}
