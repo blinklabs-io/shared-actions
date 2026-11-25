@@ -6,11 +6,17 @@ on:
       - '.github/workflows/reuseable-publish-desktop.yml'
       - '.github/workflows/test-desktop-windows.yml'
       - 'tests/desktop_cgo_windows_test.go'
+      - 'sign-windows/**'
+      - 'tests/windows-signature.ps1'
+      - 'tests/windows-signing.ps1'
   pull_request:
     paths:
       - '.github/workflows/reuseable-publish-desktop.yml'
       - '.github/workflows/test-desktop-windows.yml'
       - 'tests/desktop_cgo_windows_test.go'
+      - 'sign-windows/**'
+      - 'tests/windows-signature.ps1'
+      - 'tests/windows-signing.ps1'
 
 permissions:
   contents: read
@@ -37,6 +43,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Test signature and timestamp verification
+        shell: pwsh
+        run: |
+          ./tests/windows-signature.ps1
+          ./tests/windows-signing.ps1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26.x'
