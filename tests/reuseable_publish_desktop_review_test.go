@@ -344,3 +344,42 @@ func TestMsys2PinnedToCurrentSHA(t *testing.T) {
 		t.Errorf("expected msys2/setup-msys2 pinned to %s on both CGO rows, found %d occurrence(s)", wantSHA, got)
 	}
 }
+
+func TestWindowsReleaseSigningOrder(t *testing.T) {
+	steps := loadDesktopWorkflow(t).Jobs["build-binaries"].Steps
+	stages := []string{"Sign Windows binaries", "Build MSI (Windows)", "Sign Windows MSI", "Verify MSI signature (Windows)", "Upload MSI release asset (Windows)", "Attest MSI (Windows)"}
+	const taggedWindows = "startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows'"
+	var next int
+	var signer string
+	for _, step := range steps {
+		if next == len(stages) || step.Name != stages[next] {
+			continue
+		}
+		gate := taggedWindows
+		if next > 0 {
+			gate += " && matrix.tray"
+		}
+		if strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(step.If, "${{"), "}}")) != gate {
+			t.Fatalf("%s has unexpected release gate %q", step.Name, step.If)
+		}
+		switch step.Name {
+		case "Sign Windows binaries":
+			signer = step.Uses
+			if !strings.HasPrefix(signer, "blinklabs-io/shared-actions/sign-windows@") {
+				t.Fatalf("unexpected Windows signer %q", signer)
+			}
+		case "Sign Windows MSI":
+			if step.Uses != signer || step.With["files"] != "${{ env.MSI_PATH }}" {
+				t.Fatal("the finished MSI must use the same signer as the payloads")
+			}
+		case "Attest MSI (Windows)":
+			if step.With["subject-path"] != "${{ env.MSI_PATH }}" {
+				t.Fatal("attestation must cover the signed MSI")
+			}
+		}
+		next++
+	}
+	if next < len(stages) {
+		t.Fatalf("missing or out-of-order Windows release stage %q", stages[next])
+	}
+}

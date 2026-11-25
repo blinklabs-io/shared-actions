@@ -12,8 +12,6 @@ function java {
     if ($args -notcontains 'env:JSIGN_STOREPASS' -or $args -contains 'fixture-token' -or $args -notcontains 'RFC3161') {
         throw 'Unexpected jsign arguments.'
     }
-    $index = [Array]::IndexOf($args, '--storetype')
-    if ($index -lt 0 -or $args[$index + 1] -ne $env:SIGN_STORE_TYPE) { throw 'Unexpected jsign store type.' }
     $signed.Add($args[-1])
     $global:LASTEXITCODE = $javaStatus
 }

@@ -313,85 +313,19 @@ jobs:
         if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows' }}
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1 https://github.com/google-github-actions/setup-gcloud/releases/tag/v3.0.1
       - name: Sign Windows binaries
-        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows' }}
-        shell: pwsh
-        env:
-          CERTIFICATE_CHAIN: ${{ secrets.certificate-chain }}
-          CERTIFICATE_STORE_TYPE: ${{ secrets.certificate-store-type }}
-          CERTIFICATE_KEYSTORE: ${{ secrets.certificate-keystore }}
-          CERTIFICATE_KEY_NAME: ${{ secrets.certificate-key-name }}
-          MATRIX_TRAY: ${{ matrix.tray }}
-          SIGNING_NAME: ${{ inputs.windows-signing-name != '' && inputs.windows-signing-name || inputs.application-name }}
-          PROJECT_URL: ${{ inputs.project-url != '' && inputs.project-url || format('https://github.com/{0}', github.repository) }}
-          TSA_URL: ${{ inputs.windows-tsa-url }}
-        run: |
-          Write-Host "Downloading jsign.jar"
-          Invoke-WebRequest -Uri "https://github.com/ebourg/jsign/releases/download/6.0/jsign-6.0.jar" -OutFile "jsign.jar"
-
-          Write-Host "Verifying jsign.jar checksum"
-          $expectedHash = "05ca18d4ab7b8c2183289b5378d32860f0ea0f3bdab1f1b8cae5894fb225fa8a"
-          $actualHash = (Get-FileHash -Path "jsign.jar" -Algorithm SHA256).Hash.ToLower()
-
-          if ($actualHash -ne $expectedHash) {
-            Write-Error "Hash verification failed for jsign.jar"
-            Write-Error "Expected: $expectedHash"
-            Write-Error "Actual: $actualHash"
-            exit 1
-          }
-
-          [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("$env:CERTIFICATE_CHAIN")) | Out-File -FilePath "codesign-chain.pem" -Encoding utf8
-
-          $ACCESS_TOKEN = & gcloud auth print-access-token
-          Write-Host "::add-mask::$ACCESS_TOKEN"
-
-          # Sign every PE that will end up in the MSI. The outer MSI signature
-          # only covers the OLE compound, not the embedded binaries — so each
-          # .exe must be signed individually BEFORE wix bundles them.
-          $binariesToSign = @("$($env:APPLICATION_NAME).exe")
-          if ("$env:MATRIX_TRAY" -eq "true") {
-            $binariesToSign += "$($env:APPLICATION_NAME)-tray.exe"
-          }
-
-          foreach ($filename in $binariesToSign) {
-            if (-not (Test-Path $filename)) {
-              Write-Error "Expected binary not found: $filename"
-              exit 1
-            }
-            Write-Host "Signing $filename"
-            # --tsretries/--tsretrywait are jsign's native timestamp retry
-            # (the TSA is the part that flakes).
-            java -jar jsign.jar `
-              --storetype $env:CERTIFICATE_STORE_TYPE `
-              --storepass "$ACCESS_TOKEN" `
-              --keystore $env:CERTIFICATE_KEYSTORE `
-              --alias $env:CERTIFICATE_KEY_NAME `
-              --certfile "codesign-chain.pem" `
-              --alg SHA-256 `
-              --tsmode RFC3161 `
-              --tsaurl "$env:TSA_URL" `
-              --tsretries 3 `
-              --tsretrywait 10 `
-              --name "$env:SIGNING_NAME" `
-              --url "$env:PROJECT_URL" `
-              $filename
-            if ($LASTEXITCODE -ne 0) { Write-Error "jsign failed on $filename"; exit 1 }
-
-            # Independently confirm the PE is signed, chain-trusted AND
-            # timestamped before it gets embedded in the MSI. jsign can exit 0
-            # while the timestamp step silently failed, which this catches.
-            $sig = Get-AuthenticodeSignature $filename
-            if ($sig.Status -ne 'Valid') {
-              Write-Error "signature not valid for ${filename}: $($sig.Status)"; exit 1
-            }
-            if ($null -eq $sig.TimeStamperCertificate) {
-              Write-Error "signature for ${filename} is not timestamped"; exit 1
-            }
-            Write-Host "Signed + verified: $filename ($($sig.SignerCertificate.Subject))"
-          }
-
-          $ACCESS_TOKEN = $null
-          # NOTE: jsign.jar and codesign-chain.pem are intentionally kept on
-          # disk for the subsequent "Build MSI" step to reuse.
+        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows'
+        uses: blinklabs-io/shared-actions/sign-windows@ce1213d07b5c13c2f267c581c0bbda5c4d2d82f0
+        with:
+          files: |
+            ${{ inputs.application-name }}.exe
+            ${{ matrix.tray && format('{0}-tray.exe', inputs.application-name) || '' }}
+          application-name: ${{ inputs.windows-signing-name || inputs.application-name }}
+          application-url: ${{ inputs.project-url || format('{0}/{1}', github.server_url, github.repository) }}
+          timestamp-url: ${{ inputs.windows-tsa-url }}
+          store-type: ${{ secrets.certificate-store-type || 'GOOGLECLOUD' }}
+          certificate-chain: ${{ secrets.certificate-chain }}
+          keystore: ${{ secrets.certificate-keystore }}
+          key-name: ${{ secrets.certificate-key-name }}
 
       - name: Install WiX toolset (Windows)
         if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows' && matrix.tray }}
@@ -402,40 +336,35 @@ jobs:
           "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & "$env:USERPROFILE\.dotnet\tools\wix.exe" --version
 
-      - name: Build and sign MSI (Windows)
-        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows' && matrix.tray }}
+      - name: Build MSI (Windows)
+        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows' && matrix.tray
         shell: pwsh
         env:
-          # Reuse the binaries the previous "Sign Windows binaries" step
-          # already signed; build-msi.ps1 skips its internal `go build` when
-          # both ADDER_EXE and ADDER_TRAY_EXE point at existing files.
           ADDER_EXE: ${{ github.workspace }}\${{ env.APPLICATION_NAME }}.exe
           ADDER_TRAY_EXE: ${{ github.workspace }}\${{ env.APPLICATION_NAME }}-tray.exe
-          # MSI ProductVersion: strip leading "v" from the git tag (e.g. v0.39.1 -> 0.39.1).
           VERSION: ${{ env.RELEASE_TAG }}
           ARCH: ${{ matrix.arch }}
-          # jsign: reuse the artefacts already on disk from the binary-sign step.
-          JSIGN_JAR: ${{ github.workspace }}\jsign.jar
-          JSIGN_KEYSTORE: ${{ secrets.certificate-keystore }}
-          JSIGN_STORETYPE: ${{ secrets.certificate-store-type }}
-          JSIGN_ALIAS: ${{ secrets.certificate-key-name }}
-          JSIGN_CERTFILE: ${{ github.workspace }}\codesign-chain.pem
-          JSIGN_TSAURL: ${{ inputs.windows-tsa-url }}
         run: |
-          # Fresh, masked Google Cloud KMS access token for jsign --storepass.
-          $ACCESS_TOKEN = & gcloud auth print-access-token
-          Write-Host "::add-mask::$ACCESS_TOKEN"
-          $env:JSIGN_STOREPASS = $ACCESS_TOKEN
-
+          foreach ($payload in $env:ADDER_EXE, $env:ADDER_TRAY_EXE) {
+            if (-not (Test-Path -LiteralPath $payload -PathType Leaf)) { throw "Missing signed MSI payload: $payload" }
+          }
           pwsh ./packaging/windows/build-msi.ps1
-          if ($LASTEXITCODE -ne 0) { Write-Error "build-msi.ps1 failed"; exit 1 }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $version = $env:VERSION -replace '^v', ''
+          "MSI_PATH=dist/$($env:APPLICATION_NAME)-$version-windows-$($env:ARCH).msi" >> $env:GITHUB_ENV
 
-          $env:JSIGN_STOREPASS = $null
-          $ACCESS_TOKEN = $null
-
-          Write-Host "Cleaning up code-signing artefacts"
-          Remove-Item -Path "codesign-chain.pem" -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "jsign.jar"          -Force -ErrorAction SilentlyContinue
+      - name: Sign Windows MSI
+        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows' && matrix.tray
+        uses: blinklabs-io/shared-actions/sign-windows@ce1213d07b5c13c2f267c581c0bbda5c4d2d82f0
+        with:
+          files: ${{ env.MSI_PATH }}
+          application-name: ${{ inputs.windows-signing-name || inputs.application-name }}
+          application-url: ${{ inputs.project-url || format('{0}/{1}', github.server_url, github.repository) }}
+          timestamp-url: ${{ inputs.windows-tsa-url }}
+          store-type: ${{ secrets.certificate-store-type || 'GOOGLECLOUD' }}
+          certificate-chain: ${{ secrets.certificate-chain }}
+          keystore: ${{ secrets.certificate-keystore }}
+          key-name: ${{ secrets.certificate-key-name }}
 
       - name: Verify MSI signature (Windows)
         if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows' && matrix.tray }}
@@ -466,8 +395,7 @@ jobs:
           }
           Write-Host "Using signtool at: $($signtool.FullName)"
 
-          $cleanVersion = "$env:RELEASE_TAG" -replace '^v', ''
-          $msi = "dist\$($env:APPLICATION_NAME)-$cleanVersion-windows-$($env:MATRIX_ARCH).msi"
+          $msi = $env:MSI_PATH
           if (-not (Test-Path $msi)) {
             Write-Error "MSI not found at $msi"
             exit 1
@@ -557,8 +485,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ needs.create-draft-release.outputs.RELEASE_ID }}
         run: |
-          $cleanVersion = "$env:RELEASE_TAG" -replace '^v', ''
-          $msiPath  = "dist\$($env:APPLICATION_NAME)-$cleanVersion-windows-$($env:MATRIX_ARCH).msi"
+          $msiPath = $env:MSI_PATH
           # Asset name follows the existing convention:
           # <app>-<RELEASE_TAG>-<os>-<arch>.<ext> (RELEASE_TAG keeps the leading "v").
           $assetName = "$($env:APPLICATION_NAME)-$($env:RELEASE_TAG)-$($env:MATRIX_OS)-$($env:MATRIX_ARCH).msi"
@@ -617,16 +544,6 @@ jobs:
             -H "Content-Type: application/octet-stream" \
             --data-binary @"${_filename}" \
             "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${_filename}"
-
-      - name: Compute MSI path (Windows)
-        if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows' && matrix.tray
-        shell: pwsh
-        env:
-          MATRIX_ARCH: ${{ matrix.arch }}
-        run: |
-          $cleanVersion = "$env:RELEASE_TAG" -replace '^v', ''
-          $msiPath = "dist\$($env:APPLICATION_NAME)-$cleanVersion-windows-$($env:MATRIX_ARCH).msi"
-          "MSI_PATH=$msiPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Attest MSI (Windows)
         if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows' && matrix.tray
