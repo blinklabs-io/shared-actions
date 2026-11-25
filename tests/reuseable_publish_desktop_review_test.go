@@ -374,7 +374,7 @@ func TestWindowsReleaseSigningOrder(t *testing.T) {
 				t.Fatalf("unexpected signing payloads: %q", step.With["files"])
 			}
 			signer = step.Uses
-			if !strings.HasPrefix(signer, "blinklabs-io/shared-actions/sign-windows@") {
+			if signer != "blinklabs-io/shared-actions/sign-windows@f3ae0ebd71fbb78b8336fb7d8cc6b303e7c02707" {
 				t.Fatalf("unexpected Windows signer %q", signer)
 			}
 		case "Sign Windows MSI":
