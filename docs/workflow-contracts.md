@@ -52,3 +52,17 @@ Timestamp normalization prevents checkout times from changing archive bytes. For
 charts, hash the archive pulled from the registry. Deployment obtains
 `kubeconfig` from the selected caller environment; it rejects a caller-supplied
 `kubeconfig` secret.
+
+## Windows signing
+
+Call the `sign-windows` composite action on a trusted Windows runner with Java
+and an authenticated Google Cloud SDK. Pin the action to a reviewed commit.
+Pass one workspace-relative artifact path per line in `files`, the base64 PEM
+`certificate-chain`, the Google Cloud KMS `keystore` and `key-name`, and the
+`application-name`. The product URL defaults to the caller's repository URL.
+
+The action accepts unsigned inputs and verifies the embedded signature it adds.
+It signs in place using SHA-256 and an RFC 3161 timestamp. It fails if
+Windows rejects the signature or cannot find its timestamp certificate. Sign
+the executable payloads before building an installer, then invoke the same
+action on the finished MSI before uploading it.

@@ -1,0 +1,38 @@
+name: Sign Windows artifacts
+description: Sign Windows release files with Google Cloud KMS and verify their Authenticode signatures and timestamps.
+inputs:
+  files:
+    description: One unsigned artifact’s relative path per line inside the checked-out workspace.
+    required: true
+  certificate-chain:
+    description: Base64-encoded PEM certificate chain for the signing key.
+    required: true
+  keystore:
+    description: Google Cloud KMS keyring used by jsign.
+    required: true
+  key-name:
+    description: Google Cloud KMS signing key alias.
+    required: true
+  application-name:
+    description: Product name embedded in the signature.
+    required: true
+  application-url:
+    description: Product URL embedded in the signature.
+    default: ${{ github.server_url }}/${{ github.repository }}
+  timestamp-url:
+    description: RFC 3161 timestamp authority.
+    default: http://timestamp.globalsign.com/tsa/r6advanced1
+runs:
+  using: composite
+  steps:
+    - name: Sign files and verify timestamps
+      shell: pwsh
+      env:
+        SIGN_FILES: ${{ inputs.files }}
+        CERTIFICATE_CHAIN: ${{ inputs.certificate-chain }}
+        SIGN_KEYSTORE: ${{ inputs.keystore }}
+        SIGN_KEY_NAME: ${{ inputs.key-name }}
+        SIGN_NAME: ${{ inputs.application-name }}
+        SIGN_URL: ${{ inputs.application-url }}
+        TSA_URL: ${{ inputs.timestamp-url }}
+      run: '& (Join-Path $env:GITHUB_ACTION_PATH "sign.ps1")'
