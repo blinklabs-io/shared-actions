@@ -116,3 +116,18 @@ executable, then creates a ZIP containing the signed copy under the configured
 binary's name. It leaves the input unchanged and publishes the archive without
 overwriting an existing file. Submit the resulting `archive` output to
 `macos-notarize` with `format: zip`, and upload and attest that same ZIP.
+
+The `macos-package/build` action builds configured Go executables and returns a
+workspace-relative output directory for the package and CLI ZIP actions. Each
+binary setting supplies its name, module directory, package, CGO requirement and
+build tags. Version strings default to `git describe` and normally drop a
+leading `v`; `version_prefix: preserve` keeps it when the product contract
+requires it. An optional web setting builds the web project in a temporary copy
+or reuses an existing bundle, rejects placeholder content, and temporarily stages
+it for Go embedding. The original embed directory is restored after the build,
+and concurrent builds targeting it are rejected.
+
+Completed binary directories are published atomically without overwriting an
+existing output. If a process stops after publication, the complete directory
+remains and a retry refuses to replace it. The caller can inspect or remove its
+own completed build output before retrying.
