@@ -84,7 +84,8 @@ private temporary keychain and notarytool profile. A caller must run
 notarization, verification or upload step fails. Pass the setup action's
 `keychain` and `original-keychain` outputs to cleanup and guard that step with
 `always()` and the setup step's success outcome. The cleanup restores the
-original default keychain and deletes the temporary keychain. Application and
+original default keychain and search list, then deletes the temporary keychain.
+If restoration fails, the helper keeps recovery data in its temporary directory. Application and
 installer certificate passwords and the Apple credentials are supplied by the
 caller as secrets.
 

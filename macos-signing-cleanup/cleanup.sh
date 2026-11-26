@@ -20,6 +20,21 @@ if [ "$physical_workdir" != "$root/$name" ]; then
     echo 'Temporary signing keychain is outside the runner directory' >&2
     exit 1
 fi
-security default-keychain -d user -s "$original"
-security delete-keychain "$physical_workdir/signing.keychain-db"
+snapshot="$physical_workdir/search-list.json"
+original_snapshot="$physical_workdir/original-keychain"
+if [ ! -f "$snapshot" ] || [ -L "$snapshot" ] || [ ! -f "$original_snapshot" ] || [ -L "$original_snapshot" ] || [ "$(cat "$original_snapshot")" != "$original" ]; then
+    echo 'Invalid keychain recovery data' >&2
+    exit 1
+fi
+restored=true
+python3 "$GITHUB_ACTION_PATH/../macos-signing-setup/search-list.py" restore "$snapshot" || restored=false
+security default-keychain -d user -s "$original" || restored=false
+if [ -e "$physical_workdir/signing.keychain-db" ]; then
+    security delete-keychain "$physical_workdir/signing.keychain-db" || restored=false
+fi
+if [ "$restored" != true ]; then
+    echo "Keychain cleanup failed; recovery data remains in $physical_workdir" >&2
+    exit 1
+fi
+rm -f "$snapshot" "$original_snapshot"
 rmdir "$physical_workdir"

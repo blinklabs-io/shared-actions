@@ -4,6 +4,7 @@ package workflows
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,7 +31,10 @@ func TestMacOSSigningSetup(t *testing.T) {
 		{name: "missing certificate", fail: "missing", requireInstaller: true},
 		{name: "invalid certificate", fail: "base64", requireInstaller: true},
 		{name: "keychain lookup fails", fail: "lookup", requireInstaller: true},
+		{name: "search list lookup fails", fail: "search", requireInstaller: true},
+		{name: "search list update fails", fail: "extend", requireInstaller: true},
 		{name: "import fails", fail: "import", requireInstaller: true},
+		{name: "import and cleanup fail", fail: "import-delete", requireInstaller: true},
 		{name: "notary fails", fail: "notary", requireInstaller: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -49,10 +53,17 @@ for var in MACOS_APP_CERT MACOS_APP_PASSWORD MACOS_INSTALL_CERT MACOS_INSTALL_PA
 done
 case "$1" in
   default-keychain) if [ "$#" = 3 ]; then [ "$TEST_FAIL" != lookup ] || exit 7; printf '    "/tmp/original keychain"\n'; fi ;;
+  list-keychains)
+    if [ "$#" = 3 ]; then
+      [ "$TEST_FAIL" != search ] || exit 7
+      printf '    "/tmp/first keychain"\n    "/tmp/second.keychain"\n'
+    elif [ "$#" = 7 ] && [ "$TEST_FAIL" = extend ]; then
+      exit 7
+    fi ;;
   create-keychain|unlock-keychain|set-key-partition-list)
     printf 'Password:'; IFS= read -r secret
     if [ "$1" = create-keychain ]; then touch "$2"; fi ;;
-  delete-keychain) rm -f "$2" ;;
+  delete-keychain) [ "${TEST_FAIL:-}" != import-delete ] || exit 7; rm -f "$2" ;;
 esac
 `)
 			write("xcrun", `#!/bin/bash
@@ -63,7 +74,7 @@ for var in MACOS_APP_CERT MACOS_APP_PASSWORD MACOS_INSTALL_CERT MACOS_INSTALL_PA
 done
 if [ "$1" = swift ]; then
   [ "$(stat -f %Lp "$P12_PATH")" = 600 ] || exit 8
-  [ "$TEST_FAIL" != import ] || exit 7
+  [ "$TEST_FAIL" != import ] && [ "$TEST_FAIL" != import-delete ] || exit 7
 else
   printf 'Password:'; IFS= read -r secret
   [ "$TEST_FAIL" != notary ] || exit 7
@@ -109,6 +120,20 @@ fi
 				t.Fatal(err)
 			}
 			if !tc.success {
+				if tc.fail == "import-delete" {
+					if len(dirs) != 1 || !strings.Contains(string(output), "recovery data remains") {
+						t.Fatalf("failed deletion not reported: %v %s", dirs, output)
+					}
+					for _, name := range []string{"search-list.json", "original-keychain", "signing.keychain-db"} {
+						if _, err := os.Stat(filepath.Join(dirs[0], name)); err != nil {
+							t.Fatalf("missing recovery file %s: %v", name, err)
+						}
+					}
+					if _, err := os.Stat(filepath.Join(dirs[0], "application.p12")); !os.IsNotExist(err) {
+						t.Fatalf("certificate file remains: %v", err)
+					}
+					return
+				}
 				if len(dirs) != 0 {
 					t.Fatalf("failed setup left files: %v", dirs)
 				}
@@ -128,11 +153,26 @@ fi
 			if outputs["original-keychain"] != "/tmp/original keychain" || outputs["notary-profile"] != "release-notary" {
 				t.Fatalf("unexpected outputs: %s", data)
 			}
+			snapshot, err := os.ReadFile(filepath.Join(filepath.Dir(outputs["keychain"]), "search-list.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var paths []string
+			if err := json.Unmarshal(snapshot, &paths); err != nil || len(paths) != 2 || paths[0] != "/tmp/first keychain" || paths[1] != "/tmp/second.keychain" {
+				t.Fatalf("unexpected search list: %s %v", snapshot, err)
+			}
 			cmd = exec.CommandContext(t.Context(), "bash", cleanup)
-			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "TEST_LOG="+log, "MACOS_SIGNING_KEYCHAIN="+outputs["keychain"], "MACOS_ORIGINAL_KEYCHAIN="+outputs["original-keychain"])
+			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "TEST_LOG="+log, "MACOS_SIGNING_KEYCHAIN="+outputs["keychain"], "MACOS_ORIGINAL_KEYCHAIN="+outputs["original-keychain"], "GITHUB_ACTION_PATH="+filepath.Dir(cleanup))
 			output, err = cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("cleanup failed: %v %s", err, output)
+			}
+			calls, err = os.ReadFile(log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(calls), "security list-keychains -d user -s "+outputs["keychain"]+" /tmp/first keychain /tmp/second.keychain") || !strings.Contains(string(calls), "security list-keychains -d user -s /tmp/first keychain /tmp/second.keychain") {
+				t.Fatalf("search list not extended and restored in order: %s", calls)
 			}
 			dirs, err = filepath.Glob(filepath.Join(dir, "macos-signing.*"))
 			if err != nil || len(dirs) != 0 {
@@ -177,5 +217,63 @@ func TestMacOSSigningCleanupRejectsUnsafePaths(t *testing.T) {
 				t.Fatalf("security was called for unsafe path: %v", err)
 			}
 		})
+	}
+}
+
+func TestMacOSSigningCleanupContinuesAfterRestoreFailure(t *testing.T) {
+	cleanup, err := filepath.Abs("../macos-signing-cleanup/cleanup.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "macos-signing.fixture")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{"signing.keychain-db": "keychain", "search-list.json": "[\"/tmp/original\"]", "original-keychain": "/tmp/original"}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	security := filepath.Join(root, "security")
+	stub := `#!/bin/sh
+printf '%s\n' "$*" >> "$TEST_LOG"
+if [ "$1" = list-keychains ]; then exit 7; fi
+if [ "$1" = delete-keychain ]; then rm -f "$2"; fi
+`
+	if err := os.WriteFile(security, []byte(stub), 0755); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(root, "calls")
+	cmd := exec.CommandContext(t.Context(), "bash", cleanup)
+	cmd.Env = append(os.Environ(), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+root, "GITHUB_ACTION_PATH="+filepath.Dir(cleanup), "MACOS_SIGNING_KEYCHAIN="+filepath.Join(dir, "signing.keychain-db"), "MACOS_ORIGINAL_KEYCHAIN=/tmp/original", "TEST_LOG="+log)
+	output, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(output), "recovery data remains") {
+		t.Fatalf("restore failure not reported: %v %s", err, output)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(calls), "default-keychain -d user -s /tmp/original") || !strings.Contains(string(calls), "delete-keychain ") {
+		t.Fatalf("later cleanup was skipped: %s", calls)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "signing.keychain-db")); !os.IsNotExist(err) {
+		t.Fatalf("temporary keychain remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "search-list.json")); err != nil {
+		t.Fatalf("recovery data missing: %v", err)
+	}
+	if err := os.WriteFile(security, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	retry := exec.CommandContext(t.Context(), "bash", cleanup)
+	retry.Env = cmd.Env
+	if output, err := retry.CombinedOutput(); err != nil {
+		t.Fatalf("cleanup retry failed: %v %s", err, output)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("cleanup retry left recovery directory: %v", err)
 	}
 }

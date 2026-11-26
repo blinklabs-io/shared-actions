@@ -34,7 +34,7 @@ unset MACOS_APP_CERT MACOS_APP_PASSWORD MACOS_INSTALL_CERT MACOS_INSTALL_PASSWOR
     MACOS_KEYCHAIN_PASSWORD MACOS_APPLE_ID MACOS_APPLE_PASSWORD
 
 umask 077
-original_keychain=$(security default-keychain -d user | sed -e 's/^[[:space:]]*"//' -e 's/"[[:space:]]*$//')
+original_keychain=$(python3 "$GITHUB_ACTION_PATH/search-list.py" default)
 if [ -z "$original_keychain" ]; then
     echo 'Cannot determine original default keychain' >&2
     exit 1
@@ -43,19 +43,37 @@ workdir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/macos-signing.XXXXXXXX")
 keychain="$workdir/signing.keychain-db"
 profile=release-notary
 complete=false
+search_snapshot="$workdir/search-list.json"
+original_snapshot="$workdir/original-keychain"
+search_changed=false
 cleanup() {
     rm -f "$workdir/application.p12" "$workdir/installer.p12"
     if [ "$complete" != true ]; then
-        security default-keychain -d user -s "$original_keychain" >/dev/null 2>&1 || true
-        security delete-keychain "$keychain" >/dev/null 2>&1 || true
-        rmdir "$workdir" 2>/dev/null || true
+        restored=true
+        if [ "$search_changed" = true ]; then
+            python3 "$GITHUB_ACTION_PATH/search-list.py" restore "$search_snapshot" || restored=false
+        fi
+        security default-keychain -d user -s "$original_keychain" >/dev/null 2>&1 || restored=false
+        if [ -e "$keychain" ] || [ -L "$keychain" ]; then
+            security delete-keychain "$keychain" >/dev/null 2>&1 || restored=false
+        fi
+        if [ "$restored" = true ]; then
+            rm -f "$search_snapshot" "$original_snapshot"
+            rmdir "$workdir" 2>/dev/null || true
+        else
+            echo "Keychain restoration failed; recovery data remains in $workdir" >&2
+        fi
     fi
 }
 trap cleanup EXIT
+printf '%s' "$original_keychain" > "$original_snapshot"
+python3 "$GITHUB_ACTION_PATH/search-list.py" snapshot "$search_snapshot"
 printf '%s' "$app_cert" | base64 --decode -o "$workdir/application.p12"
 unset app_cert
 SECRET_INPUT="$keychain_password" SECRET_ACTION=create SECRET_KEYCHAIN="$keychain" /usr/bin/expect "$GITHUB_ACTION_PATH/secret.exp"
 security default-keychain -d user -s "$keychain"
+search_changed=true
+python3 "$GITHUB_ACTION_PATH/search-list.py" extend "$search_snapshot" "$keychain"
 security set-keychain-settings -lut 21600 "$keychain"
 SECRET_INPUT="$keychain_password" SECRET_ACTION=unlock SECRET_KEYCHAIN="$keychain" /usr/bin/expect "$GITHUB_ACTION_PATH/secret.exp"
 P12_PASSWORD="$app_password" P12_PATH="$workdir/application.p12" TRUSTED_APPLICATION=/usr/bin/codesign xcrun swift "$GITHUB_ACTION_PATH/import.swift"
