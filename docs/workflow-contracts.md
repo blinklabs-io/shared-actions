@@ -68,3 +68,11 @@ It signs in place using SHA-256 and an RFC 3161 timestamp. It fails if
 Windows rejects the signature or cannot find its timestamp certificate. Sign
 the executable payloads before building an installer, then invoke the same
 action on the finished MSI before uploading it.
+
+## macOS notarization
+
+The `macos-notarize` action submits a signed `pkg` or `zip` using an existing
+notarytool keychain profile. It requires an accepted notarization result. For a
+package, it staples and validates the ticket, retrying transient stapler
+failures. ZIP archives are submitted without stapling. The caller must upload
+and attest the same submitted artifact.
