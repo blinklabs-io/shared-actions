@@ -1,0 +1,30 @@
+name: Sign macOS CLI archive
+description: Sign a macOS CLI executable and create a ZIP for notarization.
+inputs:
+  binary:
+    description: Workspace-relative path of the executable.
+    required: true
+  archive:
+    description: Workspace-relative ZIP output path.
+    required: true
+  identifier:
+    description: Code signing identifier.
+    required: true
+  application-identity:
+    description: Developer ID Application identity.
+    required: true
+outputs:
+  archive:
+    description: Absolute path of the signed ZIP to notarize.
+    value: ${{ steps.sign.outputs.archive }}
+runs:
+  using: composite
+  steps:
+    - id: sign
+      shell: bash
+      env:
+        MACOS_CLI_BINARY: ${{ inputs.binary }}
+        MACOS_CLI_ARCHIVE: ${{ inputs.archive }}
+        MACOS_CLI_IDENTIFIER: ${{ inputs.identifier }}
+        MACOS_APPLICATION_IDENTITY: ${{ inputs.application-identity }}
+      run: 'python3 "$GITHUB_ACTION_PATH/../sign-zip.py" "$MACOS_CLI_BINARY" "$MACOS_CLI_ARCHIVE" "$MACOS_CLI_IDENTIFIER"'

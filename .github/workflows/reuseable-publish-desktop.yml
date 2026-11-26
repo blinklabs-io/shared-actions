@@ -63,6 +63,11 @@ on:
         required: false
         type: string
         default: ""
+      macos-release-config:
+        description: JSON product settings for the shared macOS release action. Empty preserves the legacy packaging contract.
+        required: false
+        type: string
+        default: ""
       apple-signing-org:
         description: Organization name in the Apple Developer ID identities (e.g. "Blink Labs Software").
         required: false
@@ -408,6 +413,44 @@ jobs:
           }
           Write-Host "MSI signature verified: $msi"
 
+      - name: Validate desktop macOS settings
+        if: matrix.os == 'darwin' && inputs.macos-release-config != ''
+        env:
+          MACOS_RELEASE_CONFIG: ${{ inputs.macos-release-config }}
+          APPLICATION_NAME: ${{ inputs.application-name }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          config = json.loads(os.environ["MACOS_RELEASE_CONFIG"])
+          if (not isinstance(config, dict)
+                  or config.get("artifact_type") != "pkg"
+                  or config.get("artifact_basename") != os.environ["APPLICATION_NAME"]
+                  or not isinstance(config.get("build"), dict)
+                  or config["build"].get("version_prefix", "strip") != "strip"):
+              raise SystemExit("desktop macOS releases require a matching pkg basename and stripped version")
+          PY
+
+      - name: Build shared macOS package
+        id: shared-macos
+        if: matrix.os == 'darwin' && inputs.macos-release-config != ''
+        uses: $/macos-release
+        with:
+          config: ${{ inputs.macos-release-config }}
+          architecture: ${{ matrix.arch }}
+          version: ${{ startsWith(github.ref, 'refs/tags/') && env.RELEASE_TAG || '' }}
+          mode: ${{ startsWith(github.ref, 'refs/tags/') && 'signed' || 'unsigned' }}
+          signing-organization: ${{ inputs.apple-signing-org }}
+          application-certificate: ${{ secrets.apple-certificate }}
+          application-password: ${{ secrets.apple-certificate-password }}
+          installer-certificate: ${{ secrets.apple-installer-certificate }}
+          installer-password: ${{ secrets.apple-installer-certificate-password }}
+          keychain-password: ${{ secrets.apple-keychain-password }}
+          apple-id: ${{ secrets.apple-id }}
+          apple-password: ${{ secrets.apple-app-specific-password }}
+          team-id: ${{ secrets.apple-team-id }}
+
       # Build macOS .pkg installer
       #
       # On tag pushes: import both Developer ID certs, store notarytool creds,
@@ -415,7 +458,7 @@ jobs:
       # .pkg under dist/. On non-tag pushes: run build-pkg.sh unsigned to
       # validate the packaging path on every push.
       - name: Build macOS .pkg
-        if: matrix.os == 'darwin'
+        if: matrix.os == 'darwin' && inputs.macos-release-config == ''
         env:
           IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/') }}
           APPLE_CERTIFICATE: ${{ secrets.apple-certificate }}
@@ -508,11 +551,16 @@ jobs:
           MATRIX_ARCH: ${{ matrix.arch }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ needs.create-draft-release.outputs.RELEASE_ID }}
+          MACOS_PACKAGE_PATH: ${{ steps.shared-macos.outputs.artifact }}
         run: |
           set -euo pipefail
           _version="${RELEASE_TAG#v}"
           _filename="${APPLICATION_NAME}-${_version}-${MATRIX_OS}-${MATRIX_ARCH}.pkg"
-          _path="dist/${_filename}"
+          _path="${MACOS_PACKAGE_PATH:-dist/${_filename}}"
+          if [ "$(basename "${_path}")" != "${_filename}" ]; then
+            echo "::error::macOS package name does not match the release asset contract" >&2
+            exit 1
+          fi
           curl --fail --show-error --silent \
             -H "Authorization: token ${GH_TOKEN}" \
             -H "Content-Type: application/octet-stream" \
@@ -555,7 +603,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'darwin'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2 https://github.com/actions/attest/releases/tag/v4.2.2
         with:
-          subject-path: 'dist/*.pkg'
+          subject-path: ${{ steps.shared-macos.outputs.artifact || 'dist/*.pkg' }}
 
       - name: Attest binary
         if: startsWith(github.ref, 'refs/tags/') && matrix.os != 'windows' && matrix.os != 'darwin'

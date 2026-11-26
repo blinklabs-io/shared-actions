@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -20,6 +21,7 @@ type desktopWorkflow struct {
 	} `yaml:"on"`
 	Jobs map[string]struct {
 		If          string            `yaml:"if"`
+		RunsOn      string            `yaml:"runs-on"`
 		Needs       yaml.Node         `yaml:"needs"`
 		Permissions map[string]string `yaml:"permissions"`
 		Strategy    struct {
@@ -38,6 +40,46 @@ type desktopWorkflow struct {
 			Env  map[string]string `yaml:"env"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
+}
+
+func TestDesktopMacOSSettingsValidation(t *testing.T) {
+	var script string
+	validated := false
+	for _, step := range loadDesktopWorkflow(t).Jobs["build-binaries"].Steps {
+		if step.Name == "Validate desktop macOS settings" {
+			if step.If != "matrix.os == 'darwin' && inputs.macos-release-config != ''" {
+				t.Fatal("desktop macOS validation must have the same gate as packaging")
+			}
+			script = step.Run
+			validated = true
+		}
+		if step.Name == "Build shared macOS package" && !validated {
+			t.Fatal("desktop macOS validation must precede packaging")
+		}
+	}
+	if script == "" {
+		t.Fatal("missing desktop macOS settings validation")
+	}
+	for _, tc := range []struct {
+		name, config string
+		valid        bool
+	}{
+		{"valid default", `{"artifact_type":"pkg","artifact_basename":"adder","build":{}}`, true},
+		{"valid explicit", `{"artifact_type":"pkg","artifact_basename":"adder","build":{"version_prefix":"strip"}}`, true},
+		{"zip", `{"artifact_type":"zip","artifact_basename":"adder","build":{}}`, false},
+		{"wrong basename", `{"artifact_type":"pkg","artifact_basename":"bursa","build":{}}`, false},
+		{"preserved version", `{"artifact_type":"pkg","artifact_basename":"adder","build":{"version_prefix":"preserve"}}`, false},
+		{"malformed", `{`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", "-e", "-c", script)
+			cmd.Env = append(os.Environ(), "MACOS_RELEASE_CONFIG="+tc.config, "APPLICATION_NAME=adder")
+			out, err := cmd.CombinedOutput()
+			if (err == nil) != tc.valid {
+				t.Fatalf("validation success=%t, want %t: %s", err == nil, tc.valid, out)
+			}
+		})
+	}
 }
 
 func loadDesktopWorkflow(t *testing.T) desktopWorkflow {
@@ -390,5 +432,51 @@ func TestWindowsReleaseSigningOrder(t *testing.T) {
 	}
 	if next < len(stages) {
 		t.Fatalf("missing or out-of-order Windows release stage %q", stages[next])
+	}
+}
+
+func TestDesktopMacOSCommonRelease(t *testing.T) {
+	steps := loadDesktopWorkflow(t).Jobs["build-binaries"].Steps
+	found := map[string]bool{}
+	for _, step := range steps {
+		switch step.Name {
+		case "Build shared macOS package":
+			found[step.Name] = true
+			if step.If != "matrix.os == 'darwin' && inputs.macos-release-config != ''" || step.Uses != "$/macos-release" || step.With["config"] != "${{ inputs.macos-release-config }}" {
+				t.Fatalf("unexpected common macOS release call: %+v", step)
+			}
+			if step.With["mode"] != "${{ startsWith(github.ref, 'refs/tags/') && 'signed' || 'unsigned' }}" || step.With["version"] != "${{ startsWith(github.ref, 'refs/tags/') && env.RELEASE_TAG || '' }}" {
+				t.Fatal("macOS release mode or version does not follow tag gating")
+			}
+			for input, secret := range map[string]string{
+				"application-certificate": "apple-certificate", "application-password": "apple-certificate-password",
+				"installer-certificate": "apple-installer-certificate", "installer-password": "apple-installer-certificate-password",
+				"keychain-password": "apple-keychain-password", "apple-id": "apple-id", "apple-password": "apple-app-specific-password", "team-id": "apple-team-id",
+			} {
+				if step.With[input] != "${{ secrets."+secret+" }}" {
+					t.Errorf("macOS input %s does not receive its declared secret", input)
+				}
+			}
+		case "Build macOS .pkg":
+			found[step.Name] = true
+			if step.If != "matrix.os == 'darwin' && inputs.macos-release-config == ''" {
+				t.Fatalf("legacy macOS gate changed: %s", step.If)
+			}
+		case "Upload release asset (macOS pkg)":
+			found[step.Name] = true
+			if step.Env["MACOS_PACKAGE_PATH"] != "${{ steps.shared-macos.outputs.artifact }}" || !strings.Contains(step.Run, `${MACOS_PACKAGE_PATH:-dist/${_filename}}`) || !strings.Contains(step.Run, `$(basename "${_path}")`) {
+				t.Fatal("upload must use the shared artifact and retain its release asset name")
+			}
+		case "Attest pkg (macOS)":
+			found[step.Name] = true
+			if step.With["subject-path"] != "${{ steps.shared-macos.outputs.artifact || 'dist/*.pkg' }}" {
+				t.Fatal("attestation must cover the shared artifact")
+			}
+		}
+	}
+	for _, name := range []string{"Build shared macOS package", "Build macOS .pkg", "Upload release asset (macOS pkg)", "Attest pkg (macOS)"} {
+		if !found[name] {
+			t.Errorf("missing step %q", name)
+		}
 	}
 }

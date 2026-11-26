@@ -1,0 +1,73 @@
+name: Test macOS signing helpers
+
+on:
+  pull_request:
+    paths:
+      - 'macos-signing-setup/**'
+      - 'macos-signing-cleanup/**'
+      - 'tests/macos_signing_setup_test.go'
+      - '.github/workflows/test-macos-signing.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'macos-signing-setup/**'
+      - 'macos-signing-cleanup/**'
+      - 'tests/macos_signing_setup_test.go'
+      - '.github/workflows/test-macos-signing.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Test signing setup and cleanup
+        run: go test ./tests -run '^TestMacOSSigning(Setup|Cleanup)' -count=1 -v
+      - name: Exercise the real keychain search list
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=$(mktemp -d "$RUNNER_TEMP/macos-search.XXXXXXXX")
+          keychain="$dir/test.keychain-db"
+          snapshot="$dir/search.json"
+          original=''
+          cleanup() {
+            result=$?
+            restored=true
+            if [ -f "$snapshot" ]; then
+              python3 macos-signing-setup/search-list.py restore "$snapshot" || restored=false
+            fi
+            if [ -n "$original" ]; then
+              security default-keychain -d user -s "$original" || restored=false
+            fi
+            if [ -e "$keychain" ]; then
+              security delete-keychain "$keychain" || restored=false
+            fi
+            if [ "$restored" = true ]; then
+              rm -f "$snapshot" "$dir/after.json"
+              rmdir "$dir" || result=1
+            else
+              echo "Keychain cleanup failed; recovery data remains in $dir" >&2
+              result=1
+            fi
+            exit "$result"
+          }
+          trap cleanup EXIT
+          original=$(python3 macos-signing-setup/search-list.py default)
+          python3 macos-signing-setup/search-list.py snapshot "$snapshot"
+          security create-keychain -p fixture "$keychain"
+          security default-keychain -d user -s "$keychain"
+          python3 macos-signing-setup/search-list.py extend "$snapshot" "$keychain"
+          security list-keychains -d user | grep -F "$keychain"
+          python3 macos-signing-setup/search-list.py restore "$snapshot"
+          security default-keychain -d user -s "$original"
+          [ "$(python3 macos-signing-setup/search-list.py default)" = "$original" ]
+          python3 macos-signing-setup/search-list.py snapshot "$dir/after.json"
+          cmp "$snapshot" "$dir/after.json"

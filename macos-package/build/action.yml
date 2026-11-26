@@ -1,0 +1,38 @@
+name: Build macOS application binaries
+description: Build configured Go binaries and embed an optional web bundle.
+inputs:
+  config:
+    description: JSON binary build and optional web asset settings.
+    required: true
+  output:
+    description: New workspace-relative output directory for built binaries.
+    required: true
+  version:
+    description: Product version, optionally prefixed by v; defaults to git describe.
+    required: false
+  architecture:
+    description: Target Go architecture, arm64 or amd64.
+    required: true
+outputs:
+  directory:
+    description: Workspace-relative path of the built binary directory.
+    value: ${{ steps.build.outputs.directory }}
+  version:
+    description: Resolved version embedded in the binaries.
+    value: ${{ steps.build.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: build
+      shell: bash
+      env:
+        MACOS_BUILD_CONFIG: ${{ inputs.config }}
+        MACOS_BUILD_OUTPUT: ${{ inputs.output }}
+        MACOS_BUILD_VERSION: ${{ inputs.version }}
+        MACOS_BUILD_ARCH: ${{ inputs.architecture }}
+      run: |
+        set -euo pipefail
+        config_path=$(mktemp "${RUNNER_TEMP}/macos-build-config.XXXXXXXX")
+        trap 'rm -f "$config_path"' EXIT
+        printf '%s' "$MACOS_BUILD_CONFIG" > "$config_path"
+        python3 "$GITHUB_ACTION_PATH/../build.py" "$config_path" "$MACOS_BUILD_OUTPUT" "$MACOS_BUILD_VERSION" "$MACOS_BUILD_ARCH"

@@ -1,0 +1,34 @@
+name: Verify macOS package
+description: Verify a notarized installer and optionally test installation on a disposable runner.
+inputs:
+  package:
+    description: Package path inside the workspace.
+    required: true
+  metadata:
+    description: JSON package metadata used by macos-package.
+    required: true
+  install:
+    description: Install and verify the app on this disposable runner.
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        MACOS_PACKAGE_PATH: ${{ inputs.package }}
+        MACOS_PACKAGE_METADATA: ${{ inputs.metadata }}
+        MACOS_PACKAGE_VERIFY_INSTALL: ${{ inputs.install }}
+      run: |
+        set -euo pipefail
+        case "$MACOS_PACKAGE_VERIFY_INSTALL" in
+          true|false) ;;
+          *) echo 'install must be true or false' >&2; exit 1 ;;
+        esac
+        metadata_path=$(mktemp "${RUNNER_TEMP}/macos-package-metadata.XXXXXXXX")
+        trap 'rm -f "$metadata_path"' EXIT
+        printf '%s' "$MACOS_PACKAGE_METADATA" > "$metadata_path"
+        if [ "$MACOS_PACKAGE_VERIFY_INSTALL" = true ]; then
+          python3 "$GITHUB_ACTION_PATH/../verify.py" "$metadata_path" "$MACOS_PACKAGE_PATH" --install
+        else
+          python3 "$GITHUB_ACTION_PATH/../verify.py" "$metadata_path" "$MACOS_PACKAGE_PATH"
+        fi

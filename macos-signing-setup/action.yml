@@ -1,0 +1,66 @@
+name: Set up macOS signing
+description: Import Apple Developer ID certificates and prepare notarization credentials.
+inputs:
+  application-certificate:
+    description: Base64-encoded Developer ID Application PKCS12 certificate.
+    required: true
+  application-password:
+    description: Application certificate password.
+    required: true
+  installer-certificate:
+    description: Base64-encoded Developer ID Installer PKCS12 certificate, required for packages.
+    required: false
+  installer-password:
+    description: Installer certificate password.
+    required: false
+  require-installer:
+    description: Require an installer certificate for the signed artifact.
+    default: 'true'
+  keychain-password:
+    description: Password for the temporary signing keychain.
+    required: true
+  apple-id:
+    description: Apple ID for notarization.
+    required: true
+  apple-password:
+    description: App-specific password for notarization.
+    required: true
+  team-id:
+    description: Apple Developer Team ID.
+    required: true
+  organization:
+    description: Organization in Developer ID certificate identity names.
+    required: true
+outputs:
+  keychain:
+    description: Temporary keychain path for cleanup.
+    value: ${{ steps.setup.outputs.keychain }}
+  original-keychain:
+    description: Original default keychain path for cleanup.
+    value: ${{ steps.setup.outputs.original-keychain }}
+  application-identity:
+    description: Developer ID Application identity name.
+    value: ${{ steps.setup.outputs.application-identity }}
+  installer-identity:
+    description: Developer ID Installer identity name, when imported.
+    value: ${{ steps.setup.outputs.installer-identity }}
+  notary-profile:
+    description: Keychain profile for notarytool.
+    value: ${{ steps.setup.outputs.notary-profile }}
+runs:
+  using: composite
+  steps:
+    - id: setup
+      shell: bash
+      env:
+        MACOS_APP_CERT: ${{ inputs.application-certificate }}
+        MACOS_APP_PASSWORD: ${{ inputs.application-password }}
+        MACOS_INSTALL_CERT: ${{ inputs.installer-certificate }}
+        MACOS_INSTALL_PASSWORD: ${{ inputs.installer-password }}
+        MACOS_REQUIRE_INSTALLER: ${{ inputs.require-installer }}
+        MACOS_KEYCHAIN_PASSWORD: ${{ inputs.keychain-password }}
+        MACOS_APPLE_ID: ${{ inputs.apple-id }}
+        MACOS_APPLE_PASSWORD: ${{ inputs.apple-password }}
+        MACOS_TEAM_ID: ${{ inputs.team-id }}
+        MACOS_ORGANIZATION: ${{ inputs.organization }}
+      run: 'bash "$GITHUB_ACTION_PATH/setup.sh"'

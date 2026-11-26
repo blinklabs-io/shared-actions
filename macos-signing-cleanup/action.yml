@@ -1,0 +1,17 @@
+name: Clean up macOS signing
+description: Restore the default keychain and remove the temporary signing keychain.
+inputs:
+  keychain:
+    description: Temporary keychain path returned by macos-signing-setup.
+    required: true
+  original-keychain:
+    description: Previous default keychain returned by macos-signing-setup.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        MACOS_SIGNING_KEYCHAIN: ${{ inputs.keychain }}
+        MACOS_ORIGINAL_KEYCHAIN: ${{ inputs.original-keychain }}
+      run: 'bash "$GITHUB_ACTION_PATH/cleanup.sh"'

@@ -1,0 +1,104 @@
+name: Test signed macOS release
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Product settings for the macOS artifact.
+        required: true
+        type: string
+      architecture:
+        description: macOS runner architecture.
+        required: false
+        default: arm64
+        type: string
+      go-version:
+        description: Go toolchain version.
+        required: false
+        default: '1.26.x'
+        type: string
+      node-version:
+        description: Node version for products with a web bundle; empty skips setup.
+        required: false
+        default: ''
+        type: string
+      signing-organization:
+        description: Organization in the Apple Developer ID identities.
+        required: false
+        default: Blink Labs Software
+        type: string
+    secrets:
+      apple-certificate:
+        required: true
+      apple-certificate-password:
+        required: true
+      apple-installer-certificate:
+        required: false
+      apple-installer-certificate-password:
+        required: false
+      apple-keychain-password:
+        required: true
+      apple-id:
+        required: true
+      apple-app-specific-password:
+        required: true
+      apple-team-id:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require manual dispatch from the default branch
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" != workflow_dispatch || -z "$DEFAULT_BRANCH" || "$REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo '::error::Signed macOS testing requires a manual dispatch from the default branch.' >&2
+            exit 1
+          fi
+
+  signed-artifact:
+    needs: validate-dispatch
+    runs-on: ${{ inputs.architecture == 'arm64' && 'macos-15' || 'macos-15-intel' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ inputs.go-version }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: inputs.node-version != ''
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Build and verify signed artifact
+        id: signed
+        uses: $/macos-release
+        with:
+          config: ${{ inputs.config }}
+          architecture: ${{ inputs.architecture }}
+          mode: signed
+          signing-organization: ${{ inputs.signing-organization }}
+          application-certificate: ${{ secrets.apple-certificate }}
+          application-password: ${{ secrets.apple-certificate-password }}
+          installer-certificate: ${{ secrets.apple-installer-certificate }}
+          installer-password: ${{ secrets.apple-installer-certificate-password }}
+          keychain-password: ${{ secrets.apple-keychain-password }}
+          apple-id: ${{ secrets.apple-id }}
+          apple-password: ${{ secrets.apple-app-specific-password }}
+          team-id: ${{ secrets.apple-team-id }}
+      - name: Upload verified test artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-signed-test-${{ inputs.architecture }}
+          path: ${{ steps.signed.outputs.artifact }}
+          if-no-files-found: error
+          retention-days: 7

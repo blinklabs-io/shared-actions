@@ -1,0 +1,39 @@
+name: Assemble macOS package
+description: Build a signed or unsigned macOS installer from prebuilt application binaries.
+inputs:
+  config:
+    description: JSON with metadata, workspace-relative binary sources, and icon path.
+    required: true
+  output:
+    description: Workspace-relative path of the package to create.
+    required: true
+  mode:
+    description: Package mode, signed, unsigned or adhoc.
+    default: signed
+  application-identity:
+    description: Developer ID Application identity for signed builds.
+    required: false
+  installer-identity:
+    description: Developer ID Installer identity for signed builds.
+    required: false
+outputs:
+  package:
+    description: Absolute path of the generated package.
+    value: ${{ steps.assemble.outputs.package }}
+runs:
+  using: composite
+  steps:
+    - id: assemble
+      shell: bash
+      env:
+        MACOS_PACKAGE_CONFIG: ${{ inputs.config }}
+        MACOS_PACKAGE_OUTPUT: ${{ inputs.output }}
+        MACOS_PACKAGE_MODE: ${{ inputs.mode }}
+        MACOS_APPLICATION_IDENTITY: ${{ inputs.application-identity }}
+        MACOS_INSTALLER_IDENTITY: ${{ inputs.installer-identity }}
+      run: |
+        set -euo pipefail
+        config_path=$(mktemp "${RUNNER_TEMP}/macos-package-config.XXXXXXXX")
+        trap 'rm -f "$config_path"' EXIT
+        printf '%s' "$MACOS_PACKAGE_CONFIG" > "$config_path"
+        python3 "$GITHUB_ACTION_PATH/assemble.py" "$config_path" "$MACOS_PACKAGE_OUTPUT" --mode "$MACOS_PACKAGE_MODE"

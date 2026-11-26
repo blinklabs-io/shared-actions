@@ -1,0 +1,139 @@
+name: Build and verify macOS release artifact
+description: Build configured binaries and create a signed or development macOS artifact.
+inputs:
+  config:
+    description: JSON product settings for the artifact, build, and package metadata.
+    required: true
+  architecture:
+    description: Target architecture, arm64 or amd64.
+    required: true
+  version:
+    description: Product version, defaulting to git describe.
+    required: false
+  mode:
+    description: signed, unsigned or adhoc. Tag releases require signed mode.
+    default: signed
+  verify-install:
+    description: Install and verify signed packages on a disposable runner.
+    default: 'true'
+  signing-organization:
+    description: Organization name in Apple Developer ID identities.
+    default: Blink Labs Software
+  application-certificate:
+    description: Base64-encoded Developer ID Application certificate.
+    required: false
+  application-password:
+    description: Application certificate password.
+    required: false
+  installer-certificate:
+    description: Base64-encoded Developer ID Installer certificate for packages.
+    required: false
+  installer-password:
+    description: Installer certificate password.
+    required: false
+  keychain-password:
+    description: Temporary signing keychain password.
+    required: false
+  apple-id:
+    description: Apple ID for notarization.
+    required: false
+  apple-password:
+    description: Apple app-specific password for notarization.
+    required: false
+  team-id:
+    description: Apple Developer Team ID.
+    required: false
+outputs:
+  artifact:
+    description: Path of the built and verified artifact.
+    value: ${{ steps.complete.outputs.artifact }}
+  version:
+    description: Version embedded in the built binaries.
+    value: ${{ steps.build.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - id: prepare
+      shell: bash
+      env:
+        MACOS_RELEASE_CONFIG: ${{ inputs.config }}
+        MACOS_RELEASE_MODE: ${{ inputs.mode }}
+        MACOS_RELEASE_ARCH: ${{ inputs.architecture }}
+      run: 'python3 "$GITHUB_ACTION_PATH/compose.py" prepare'
+    - id: build
+      uses: $/macos-package/build
+      with:
+        config: ${{ steps.prepare.outputs.build-config }}
+        output: ${{ steps.prepare.outputs.build-directory }}
+        version: ${{ inputs.version }}
+        architecture: ${{ inputs.architecture }}
+    - id: inputs
+      shell: bash
+      env:
+        MACOS_RELEASE_CONFIG: ${{ inputs.config }}
+        MACOS_RELEASE_MODE: ${{ inputs.mode }}
+        MACOS_RELEASE_ARCH: ${{ inputs.architecture }}
+        MACOS_BUILD_DIRECTORY: ${{ steps.build.outputs.directory }}
+        MACOS_BUILD_VERSION: ${{ steps.build.outputs.version }}
+      run: 'python3 "$GITHUB_ACTION_PATH/compose.py" package'
+    - id: signing
+      if: inputs.mode == 'signed'
+      uses: $/macos-signing-setup
+      with:
+        application-certificate: ${{ inputs.application-certificate }}
+        application-password: ${{ inputs.application-password }}
+        installer-certificate: ${{ steps.prepare.outputs.artifact-type == 'pkg' && inputs.installer-certificate || '' }}
+        installer-password: ${{ steps.prepare.outputs.artifact-type == 'pkg' && inputs.installer-password || '' }}
+        require-installer: ${{ steps.prepare.outputs.artifact-type == 'pkg' }}
+        keychain-password: ${{ inputs.keychain-password }}
+        apple-id: ${{ inputs.apple-id }}
+        apple-password: ${{ inputs.apple-password }}
+        team-id: ${{ inputs.team-id }}
+        organization: ${{ inputs.signing-organization }}
+    - id: package
+      if: steps.prepare.outputs.artifact-type == 'pkg'
+      uses: $/macos-package
+      with:
+        config: ${{ steps.inputs.outputs.package-config }}
+        output: ${{ steps.inputs.outputs.artifact-path }}
+        mode: ${{ inputs.mode }}
+        application-identity: ${{ steps.signing.outputs.application-identity }}
+        installer-identity: ${{ steps.signing.outputs.installer-identity }}
+    - id: zip
+      if: steps.prepare.outputs.artifact-type == 'zip'
+      uses: $/macos-package/sign-zip
+      with:
+        binary: ${{ steps.inputs.outputs.binary-path }}
+        archive: ${{ steps.inputs.outputs.artifact-path }}
+        identifier: ${{ steps.inputs.outputs.identifier }}
+        application-identity: ${{ steps.signing.outputs.application-identity }}
+    - name: Notarize artifact
+      if: inputs.mode == 'signed'
+      uses: $/macos-notarize
+      with:
+        artifact: ${{ steps.package.outputs.package || steps.zip.outputs.archive }}
+        profile: ${{ steps.signing.outputs.notary-profile }}
+        keychain: ${{ steps.signing.outputs.keychain }}
+        format: ${{ steps.prepare.outputs.artifact-type }}
+    - name: Verify notarized installer
+      if: inputs.mode == 'signed' && steps.prepare.outputs.artifact-type == 'pkg'
+      uses: $/macos-package/verify
+      with:
+        package: ${{ steps.package.outputs.package }}
+        metadata: ${{ steps.inputs.outputs.metadata }}
+        install: ${{ inputs.verify-install }}
+    - name: Clean up signing keychain
+      if: always() && steps.signing.outcome == 'success'
+      uses: $/macos-signing-cleanup
+      with:
+        keychain: ${{ steps.signing.outputs.keychain }}
+        original-keychain: ${{ steps.signing.outputs.original-keychain }}
+    - id: complete
+      shell: bash
+      env:
+        MACOS_RELEASE_ARTIFACT: ${{ steps.package.outputs.package || steps.zip.outputs.archive }}
+      run: |
+        set -euo pipefail
+        test -n "$MACOS_RELEASE_ARTIFACT"
+        test -f "$MACOS_RELEASE_ARTIFACT"
+        printf 'artifact=%s\n' "$MACOS_RELEASE_ARTIFACT" >> "$GITHUB_OUTPUT"
