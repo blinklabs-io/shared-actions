@@ -245,7 +245,7 @@ def build(config, workspace, output_path, version, architecture):
             if published_dir.exists():
                 shutil.rmtree(published_dir)
             raise
-    return output
+    return output, version
 
 
 def main():
@@ -263,11 +263,12 @@ def main():
         workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve(strict=True)
         with args.config.open(encoding="utf-8") as source:
             config = json.load(source)
-        output = build(config, workspace, args.output, args.version, args.architecture)
+        output, version = build(config, workspace, args.output, args.version, args.architecture)
         output_file = os.environ.get("GITHUB_OUTPUT")
         if output_file:
             with open(output_file, "a", encoding="utf-8") as target:
                 target.write(f"directory={output.relative_to(workspace)}\n")
+                target.write(f"version={version}\n")
         print(output)
     except (KeyError, ValueError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"macOS binary build: {error}\n")

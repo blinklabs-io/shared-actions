@@ -17,6 +17,9 @@ outputs:
   directory:
     description: Workspace-relative path of the built binary directory.
     value: ${{ steps.build.outputs.directory }}
+  version:
+    description: Resolved version embedded in the binaries.
+    value: ${{ steps.build.outputs.version }}
 runs:
   using: composite
   steps:

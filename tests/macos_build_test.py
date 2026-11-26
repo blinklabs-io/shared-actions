@@ -105,7 +105,7 @@ elif name == "npm":
         self.assertIn("example.com/adder/internal/version.CommitHash=abcdef1", " ".join(builds[0]["args"]))
         self.assertEqual((workspace / "build/shared-macos/adder").read_bytes(), b"binary")
         self.assertEqual((workspace / "build/shared-macos/adder-tray").read_bytes(), b"binary")
-        self.assertEqual(output.read_text(), "directory=build/shared-macos\n")
+        self.assertEqual(output.read_text(), "directory=build/shared-macos\nversion=1.2.3\n")
 
     def test_version_defaults_to_git_description(self):
         result, calls, _, _ = self.run_case("Adder", version="")
@@ -152,7 +152,7 @@ elif name == "npm":
     def test_build_output_feeds_package_and_cli_actions(self):
         result, _, workspace, output = self.run_case("Adder")
         self.assertEqual(result.returncode, 0, result.stderr)
-        directory = output.read_text().strip().split("=", 1)[1]
+        directory = output.read_text().splitlines()[0].split("=", 1)[1]
         root = workspace.parent
         tools = root / "tools"
         stub = """#!/usr/bin/env python3

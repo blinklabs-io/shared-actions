@@ -4,15 +4,19 @@ on:
   pull_request:
     paths:
       - 'macos-package/**'
+      - 'macos-release/**'
       - 'tests/macos_build_test.*'
       - 'tests/macos_package_*'
+      - 'tests/macos_release_test.*'
       - '.github/workflows/test-macos-package.yml'
   push:
     branches: [main]
     paths:
       - 'macos-package/**'
+      - 'macos-release/**'
       - 'tests/macos_build_test.*'
       - 'tests/macos_package_*'
+      - 'tests/macos_release_test.*'
       - '.github/workflows/test-macos-package.yml'
 
 permissions:
@@ -62,3 +66,23 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           lipo -archs "$app/Contents/MacOS/fixture" | grep -w arm64
           plutil -extract CFBundleIdentifier raw -o - "$app/Contents/Info.plist" | grep -x io.blinklabs.fixture
+      - name: Exercise the common release path
+        id: common-release
+        uses: $/macos-release
+        with:
+          config: '{"artifact_type":"pkg","artifact_basename":"fixture","build":{"binaries":[{"name":"fixture","module":".macos-fixture","package":"./cmd/fixture","cgo":false,"tags":[]}]},"metadata":{"application_name":"Fixture","bundle_id":"io.blinklabs.fixture","executable":"fixture","icon_name":"fixture"},"icon":".macos-fixture/missing.icns"}'
+          architecture: arm64
+          version: '1.2.3'
+          mode: adhoc
+      - name: Inspect common release artifact
+        shell: bash
+        env:
+          PKG_PATH: ${{ steps.common-release.outputs.artifact }}
+        run: |
+          set -euo pipefail
+          test -f "$PKG_PATH"
+          pkgutil --expand-full "$PKG_PATH" "$RUNNER_TEMP/expanded-common-release"
+          app="$RUNNER_TEMP/expanded-common-release/component.pkg/Payload/Applications/Fixture.app"
+          test -x "$app/Contents/MacOS/fixture"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          lipo -archs "$app/Contents/MacOS/fixture" | grep -w arm64

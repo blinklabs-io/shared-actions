@@ -131,3 +131,17 @@ Completed binary directories are published atomically without overwriting an
 existing output. If a process stops after publication, the complete directory
 remains and a retry refuses to replace it. The caller can inspect or remove its
 own completed build output before retrying.
+
+The `macos-release` composite action composes those helpers. Its JSON `config`
+selects `artifact_type` (`pkg` or `zip`), `artifact_basename`, and the shared
+binary `build` settings. A package also supplies `metadata` and an `icon` path;
+a ZIP supplies `cli_binary` and `signing_identifier`. The builder supplies the
+resolved version, architecture and binary names to the package metadata. Product
+callers own the configuration and pass Apple credentials as secrets.
+
+Signed packages are built, notarized, stapled and verified before the action
+returns their path. Signed CLI ZIPs are built, signed and notarized before their
+path is returned. The action restores signing keychain state even when a later
+step fails. Tag runs require signed mode. `unsigned` and `adhoc` modes are for
+package development builds. Callers must upload and attest the returned artifact
+only after the action succeeds.
