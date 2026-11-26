@@ -37,7 +37,7 @@ jobs:
           printf 'package main\nfunc main() {}\n' > .macos-fixture/cmd/fixture/main.go
       - name: Build fixture binary
         id: build
-        uses: ./macos-package/build
+        uses: $/macos-package/build
         with:
           config: '{"binaries":[{"name":"fixture","module":".macos-fixture","package":"./cmd/fixture","cgo":false,"tags":[]}]}'
           output: .macos-fixture/built
@@ -45,7 +45,7 @@ jobs:
           architecture: arm64
       - name: Assemble ad-hoc installer
         id: package
-        uses: ./macos-package
+        uses: $/macos-package
         with:
           config: '{"metadata":{"application_name":"Fixture","bundle_id":"io.blinklabs.fixture","executable":"fixture","icon_name":"fixture","version":"1.2.3","architecture":"arm64","binary_names":["fixture"]},"binaries":{"fixture":".macos-fixture/built/fixture"},"icon":".macos-fixture/missing.icns"}'
           output: .macos-fixture/fixture.pkg

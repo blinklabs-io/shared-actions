@@ -2,3 +2,9 @@ self-hosted-runner:
   labels:
     - ubuntu-26.04
     - ubuntu-26.04-arm
+
+# actionlint 1.7.12 does not yet recognize GitHub's self-repository syntax.
+paths:
+  .github/workflows/test-macos-package.yml:
+    ignore:
+      - 'specifying action "\$/macos-package(/build)?" in invalid format because ref is missing'
