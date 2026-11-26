@@ -153,6 +153,9 @@ fi
 			if outputs["original-keychain"] != "/tmp/original keychain" || outputs["notary-profile"] != "release-notary" {
 				t.Fatalf("unexpected outputs: %s", data)
 			}
+			if !strings.Contains(string(calls), "--keychain "+outputs["keychain"]) {
+				t.Fatalf("notary credentials must use the temporary keychain: %s", calls)
+			}
 			snapshot, err := os.ReadFile(filepath.Join(filepath.Dir(outputs["keychain"]), "search-list.json"))
 			if err != nil {
 				t.Fatal(err)

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate product settings and compose shared macOS release action inputs."""
+
 import argparse
 import json
 import os
@@ -20,7 +21,13 @@ def product_config(raw, architecture, mode):
     if artifact_type == "pkg":
         expected = {"artifact_type", "artifact_basename", "build", "metadata", "icon"}
     elif artifact_type == "zip":
-        expected = {"artifact_type", "artifact_basename", "build", "cli_binary", "signing_identifier"}
+        expected = {
+            "artifact_type",
+            "artifact_basename",
+            "build",
+            "cli_binary",
+            "signing_identifier",
+        }
         if mode != "signed":
             raise ValueError("CLI ZIP releases require signed mode")
     else:
@@ -33,22 +40,34 @@ def product_config(raw, architecture, mode):
         raise ValueError("invalid architecture")
     checked(config["artifact_basename"], NAME, "artifact basename")
     build = config["build"]
-    if not isinstance(build, dict) or not isinstance(build.get("binaries"), list) or not build["binaries"]:
+    if (
+        not isinstance(build, dict)
+        or not isinstance(build.get("binaries"), list)
+        or not build["binaries"]
+    ):
         raise ValueError("build settings must contain binary definitions")
     names = []
     for binary in build["binaries"]:
         if not isinstance(binary, dict):
             raise ValueError("binary definition must be an object")
         names.append(checked(binary.get("name"), NAME, "binary name"))
-    if len(set(names)) != len(names):
+    if len({name.lower() for name in names}) != len(names):
         raise ValueError("binary names must be unique")
     if artifact_type == "pkg":
         metadata = config["metadata"]
-        if not isinstance(metadata, dict) or {"version", "architecture", "binary_names"} & set(metadata):
-            raise ValueError("package metadata must omit generated version, architecture and binary names")
+        if not isinstance(metadata, dict) or {"version", "architecture", "binary_names"} & set(
+            metadata
+        ):
+            raise ValueError(
+                "package metadata must omit generated version, architecture and binary names"
+            )
         if not isinstance(config["icon"], str) or not config["icon"]:
             raise ValueError("package icon path is required")
-        sample = metadata | {"version": "0.0.0", "architecture": architecture, "binary_names": names}
+        sample = metadata | {
+            "version": "0.0.0",
+            "architecture": architecture,
+            "binary_names": names,
+        }
         with tempfile.TemporaryDirectory(prefix="macos-release-metadata-") as directory:
             render(sample, Path(directory))
     else:
@@ -79,19 +98,51 @@ def main():
             raise ValueError("tag releases require signed mode")
         config, names = product_config(os.environ["MACOS_RELEASE_CONFIG"], architecture, mode)
         if args.phase == "prepare":
-            emit({"artifact-type": config["artifact_type"], "build-config": config["build"], "build-directory": f".macos-release/{uuid.uuid4().hex}"})
+            emit(
+                {
+                    "artifact-type": config["artifact_type"],
+                    "build-config": config["build"],
+                    "build-directory": f".macos-release/{uuid.uuid4().hex}",
+                }
+            )
             return
         directory = os.environ["MACOS_BUILD_DIRECTORY"]
         version = os.environ["MACOS_BUILD_VERSION"]
-        if not directory or Path(directory).is_absolute() or ".." in Path(directory).parts or "\n" in directory or "\r" in directory:
+        if (
+            not directory
+            or Path(directory).is_absolute()
+            or ".." in Path(directory).parts
+            or "\n" in directory
+            or "\r" in directory
+        ):
             raise ValueError("invalid build directory")
         checked(version, VERSION, "version")
         artifact = f"dist/{config['artifact_basename']}-{version}-darwin-{architecture}.{config['artifact_type']}"
         if config["artifact_type"] == "pkg":
-            metadata = config["metadata"] | {"version": version, "architecture": architecture, "binary_names": names}
-            emit({"metadata": metadata, "package-config": {"metadata": metadata, "binaries": {name: f"{directory}/{name}" for name in names}, "icon": config["icon"]}, "artifact-path": artifact})
+            metadata = config["metadata"] | {
+                "version": version,
+                "architecture": architecture,
+                "binary_names": names,
+            }
+            emit(
+                {
+                    "metadata": metadata,
+                    "package-config": {
+                        "metadata": metadata,
+                        "binaries": {name: f"{directory}/{name}" for name in names},
+                        "icon": config["icon"],
+                    },
+                    "artifact-path": artifact,
+                }
+            )
         else:
-            emit({"binary-path": f"{directory}/{config['cli_binary']}", "identifier": config["signing_identifier"], "artifact-path": artifact})
+            emit(
+                {
+                    "binary-path": f"{directory}/{config['cli_binary']}",
+                    "identifier": config["signing_identifier"],
+                    "artifact-path": artifact,
+                }
+            )
     except (KeyError, ValueError, TypeError, OSError, json.JSONDecodeError) as error:
         parser.exit(1, f"macOS release settings: {error}\n")
 

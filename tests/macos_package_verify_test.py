@@ -1,5 +1,4 @@
 import importlib.util
-import os
 import subprocess
 import sys
 import tempfile
@@ -25,7 +24,16 @@ class PackageVerificationTests(unittest.TestCase):
         self.bin.mkdir()
         self.package = self.root / "test.pkg"
         self.package.write_bytes(b"package")
-        self.metadata = {"application_name": "Adder", "bundle_id": "io.blinklabs.adder", "executable": "adder-tray", "icon_name": "adder", "version": "1.2.3", "architecture": "arm64", "binary_names": ["adder", "adder-tray"], "cli_symlink": "adder"}
+        self.metadata = {
+            "application_name": "Adder",
+            "bundle_id": "io.blinklabs.adder",
+            "executable": "adder-tray",
+            "icon_name": "adder",
+            "version": "1.2.3",
+            "architecture": "arm64",
+            "binary_names": ["adder", "adder-tray"],
+            "cli_symlink": "adder",
+        }
         self.calls = []
         self.fail = ""
         self.fails = set()
@@ -50,7 +58,12 @@ class PackageVerificationTests(unittest.TestCase):
         full_label = " ".join(args[:3])
         if self.fail == "interrupt" and label == "codesign --verify":
             raise KeyboardInterrupt()
-        if label == self.fail or full_label == self.fail or label in self.fails or full_label in self.fails:
+        if (
+            label == self.fail
+            or full_label == self.fail
+            or label in self.fails
+            or full_label in self.fails
+        ):
             if check:
                 raise subprocess.CalledProcessError(7, args)
             return subprocess.CompletedProcess(args, 7, "failure")
@@ -59,7 +72,9 @@ class PackageVerificationTests(unittest.TestCase):
         if args[0] == "spctl":
             return subprocess.CompletedProcess(args, 0, "accepted\nNotarized Developer ID")
         if args[:2] == ("pkgutil", "--pkgs"):
-            return subprocess.CompletedProcess(args, 0, self.metadata["bundle_id"] + "\n" if self.receipt else "")
+            return subprocess.CompletedProcess(
+                args, 0, self.metadata["bundle_id"] + "\n" if self.receipt else ""
+            )
         if args[:2] == ("pkgutil", "--pkg-info"):
             if not self.receipt:
                 if check:
@@ -80,6 +95,7 @@ class PackageVerificationTests(unittest.TestCase):
             Path(args[3]).unlink()
         if args[:3] == ("sudo", "rm", "-rf"):
             import shutil
+
             shutil.rmtree(args[3], ignore_errors=True)
         if args[:3] == ("sudo", "pkgutil", "--forget"):
             self.receipt = False
@@ -150,9 +166,12 @@ class PackageVerificationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "cleanup failed"):
                     module.verify(self.package, self.metadata, True)
                 self.assertTrue(any(call[:3] == ("sudo", "rm", "-rf") for call in self.calls))
-                self.assertTrue(any(call[:3] == ("sudo", "pkgutil", "--forget") for call in self.calls))
+                self.assertTrue(
+                    any(call[:3] == ("sudo", "pkgutil", "--forget") for call in self.calls)
+                )
                 self.fail = ""
                 import shutil
+
                 shutil.rmtree(self.app, ignore_errors=True)
                 (self.bin / "adder").unlink(missing_ok=True)
                 self.receipt = False

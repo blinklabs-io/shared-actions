@@ -16,18 +16,58 @@ class MacOSReleaseSettingsTests(unittest.TestCase):
         self.output = self.root / "output"
         self.output.write_text("")
         self.config = {
-            "artifact_type": "pkg", "artifact_basename": "adder",
-            "build": {"binaries": [
-                {"name": "adder", "module": ".", "package": "./cmd/adder", "cgo": False, "tags": ["nodbus"]},
-                {"name": "adder-tray", "module": ".", "package": "./cmd/adder-tray", "cgo": True, "tags": []},
-            ]},
-            "metadata": {"application_name": "Adder", "bundle_id": "io.blinklabs.adder", "executable": "adder-tray", "icon_name": "adder", "cli_symlink": "adder"},
+            "artifact_type": "pkg",
+            "artifact_basename": "adder",
+            "build": {
+                "binaries": [
+                    {
+                        "name": "adder",
+                        "module": ".",
+                        "package": "./cmd/adder",
+                        "cgo": False,
+                        "tags": ["nodbus"],
+                    },
+                    {
+                        "name": "adder-tray",
+                        "module": ".",
+                        "package": "./cmd/adder-tray",
+                        "cgo": True,
+                        "tags": [],
+                    },
+                ]
+            },
+            "metadata": {
+                "application_name": "Adder",
+                "bundle_id": "io.blinklabs.adder",
+                "executable": "adder-tray",
+                "icon_name": "adder",
+                "cli_symlink": "adder",
+            },
             "icon": ".github/assets/Adder.icns",
         }
 
-    def run_compose(self, phase, mode="signed", ref="refs/heads/main", version="1.2.3", directory="build/macos", arch="arm64"):
-        env = os.environ | {"MACOS_RELEASE_CONFIG": json.dumps(self.config), "MACOS_RELEASE_MODE": mode, "MACOS_RELEASE_ARCH": arch, "MACOS_BUILD_DIRECTORY": directory, "MACOS_BUILD_VERSION": version, "GITHUB_REF": ref, "GITHUB_OUTPUT": str(self.output), "PYTHONDONTWRITEBYTECODE": "1"}
-        result = subprocess.run(["python3", str(SCRIPT), phase], env=env, text=True, capture_output=True)
+    def run_compose(
+        self,
+        phase,
+        mode="signed",
+        ref="refs/heads/main",
+        version="1.2.3",
+        directory="build/macos",
+        arch="arm64",
+    ):
+        env = os.environ | {
+            "MACOS_RELEASE_CONFIG": json.dumps(self.config),
+            "MACOS_RELEASE_MODE": mode,
+            "MACOS_RELEASE_ARCH": arch,
+            "MACOS_BUILD_DIRECTORY": directory,
+            "MACOS_BUILD_VERSION": version,
+            "GITHUB_REF": ref,
+            "GITHUB_OUTPUT": str(self.output),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        result = subprocess.run(
+            ["python3", str(SCRIPT), phase], env=env, text=True, capture_output=True
+        )
         values = dict(line.split("=", 1) for line in self.output.read_text().splitlines())
         return result, values
 
@@ -42,16 +82,42 @@ class MacOSReleaseSettingsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(values["artifact-path"], "dist/adder-1.2.3-darwin-arm64.pkg")
         package = json.loads(values["package-config"])
-        self.assertEqual(package["binaries"], {"adder": "build/macos/adder", "adder-tray": "build/macos/adder-tray"})
+        self.assertEqual(
+            package["binaries"],
+            {"adder": "build/macos/adder", "adder-tray": "build/macos/adder-tray"},
+        )
         self.assertEqual(package["metadata"]["cli_symlink"], "adder")
         self.assertEqual(package["metadata"]["version"], "1.2.3")
         self.assertEqual(json.loads(values["metadata"]), package["metadata"])
 
     def test_bursa_wallet_package_settings(self):
         self.config = {
-            "artifact_type": "pkg", "artifact_basename": "bursa-wallet",
-            "build": {"binaries": [{"name": "bursa-wallet", "module": "ui", "package": "./cmd/bursa-wallet", "cgo": True, "tags": ["webview"]}], "web": {"directory": "ui/web", "dist": "ui/web/dist", "embed": "ui/internal/webui/dist", "reuse": False, "placeholder": "Pre-build placeholder"}},
-            "metadata": {"application_name": "Bursa", "bundle_id": "com.blinklabssoftware.bursa", "executable": "bursa-wallet", "icon_name": "bursa"},
+            "artifact_type": "pkg",
+            "artifact_basename": "bursa-wallet",
+            "build": {
+                "binaries": [
+                    {
+                        "name": "bursa-wallet",
+                        "module": "ui",
+                        "package": "./cmd/bursa-wallet",
+                        "cgo": True,
+                        "tags": ["webview"],
+                    }
+                ],
+                "web": {
+                    "directory": "ui/web",
+                    "dist": "ui/web/dist",
+                    "embed": "ui/internal/webui/dist",
+                    "reuse": False,
+                    "placeholder": "Pre-build placeholder",
+                },
+            },
+            "metadata": {
+                "application_name": "Bursa",
+                "bundle_id": "com.blinklabssoftware.bursa",
+                "executable": "bursa-wallet",
+                "icon_name": "bursa",
+            },
             "icon": ".github/assets/Bursa.icns",
         }
         result, values = self.run_compose("package")
@@ -62,7 +128,24 @@ class MacOSReleaseSettingsTests(unittest.TestCase):
         self.assertEqual(package["metadata"]["bundle_id"], "com.blinklabssoftware.bursa")
 
     def test_bursa_zip_preserves_version(self):
-        self.config = {"artifact_type": "zip", "artifact_basename": "bursa", "build": {"binaries": [{"name": "bursa", "module": ".", "package": "./cmd/bursa", "cgo": False, "tags": []}], "version_prefix": "preserve"}, "cli_binary": "bursa", "signing_identifier": "com.blinklabssoftware.bursa"}
+        self.config = {
+            "artifact_type": "zip",
+            "artifact_basename": "bursa",
+            "build": {
+                "binaries": [
+                    {
+                        "name": "bursa",
+                        "module": ".",
+                        "package": "./cmd/bursa",
+                        "cgo": False,
+                        "tags": [],
+                    }
+                ],
+                "version_prefix": "preserve",
+            },
+            "cli_binary": "bursa",
+            "signing_identifier": "com.blinklabssoftware.bursa",
+        }
         result, values = self.run_compose("package", version="v1.2.3")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(values["binary-path"], "build/macos/bursa")
@@ -72,7 +155,8 @@ class MacOSReleaseSettingsTests(unittest.TestCase):
     def test_invalid_or_unsigned_tag_settings_fail(self):
         cases = [
             {"mode": "unsigned", "ref": "refs/tags/v1.2.3"},
-            {"arch": "x86"}, {"directory": "../outside", "phase": "package"},
+            {"arch": "x86"},
+            {"directory": "../outside", "phase": "package"},
             {"version": "bad/name", "phase": "package"},
         ]
         for case in cases:

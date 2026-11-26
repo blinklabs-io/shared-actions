@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Sign a prebuilt CLI executable and archive the exact signed bytes."""
+
 import argparse
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -33,7 +33,21 @@ def sign_zip(workspace, binary_path, archive_path, identity, identifier):
         signed = payload_dir / binary_name
         shutil.copyfile(binary, signed)
         signed.chmod(0o755)
-        subprocess.run(["codesign", "--force", "--sign", identity, "--timestamp", "--options", "runtime", "--identifier", identifier, str(signed)], check=True)
+        subprocess.run(
+            [
+                "codesign",
+                "--force",
+                "--sign",
+                identity,
+                "--timestamp",
+                "--options",
+                "runtime",
+                "--identifier",
+                identifier,
+                str(signed),
+            ],
+            check=True,
+        )
         subprocess.run(["codesign", "--verify", "--strict", "--verbose=2", str(signed)], check=True)
         archive = temporary / "artifact.zip"
         subprocess.run(["zip", "-q", str(archive), signed.name], cwd=payload_dir, check=True)
@@ -50,7 +64,13 @@ def main():
     args = parser.parse_args()
     try:
         workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve(strict=True)
-        result = sign_zip(workspace, args.binary, args.archive, os.environ.get("MACOS_APPLICATION_IDENTITY", ""), args.identifier)
+        result = sign_zip(
+            workspace,
+            args.binary,
+            args.archive,
+            os.environ.get("MACOS_APPLICATION_IDENTITY", ""),
+            args.identifier,
+        )
         output_file = os.environ.get("GITHUB_OUTPUT")
         if output_file:
             with open(output_file, "a", encoding="utf-8") as output:

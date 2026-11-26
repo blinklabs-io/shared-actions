@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Assemble a macOS application and installer from prebuilt product binaries."""
+
 import argparse
 import json
 import os
@@ -14,7 +15,7 @@ from pathlib import Path
 from render import render
 
 
-def workspace_path(root, relative, *, exists):
+def workspace_path(root: Path, relative: str, *, exists: bool) -> Path:
     if not isinstance(relative, str) or "\n" in relative or "\r" in relative:
         raise ValueError("path must be a single-line string")
     path = Path(relative)
@@ -23,6 +24,8 @@ def workspace_path(root, relative, *, exists):
     resolved = (root / path).resolve(strict=exists)
     if not resolved.is_relative_to(root):
         raise ValueError("path escapes the workspace")
+    if "\n" in str(resolved) or "\r" in str(resolved):
+        raise ValueError("resolved path must be a single-line string")
     return resolved
 
 
@@ -55,7 +58,11 @@ def assemble(config, workspace, output_path, mode, app_identity, installer_ident
     if mode == "signed" and (not app_identity or not installer_identity):
         raise ValueError("signed packages require application and installer identities")
     expected = metadata.get("binary_names")
-    if not isinstance(expected, list) or not all(isinstance(name, str) for name in expected) or set(binaries) != set(expected):
+    if (
+        not isinstance(expected, list)
+        or not all(isinstance(name, str) for name in expected)
+        or set(binaries) != set(expected)
+    ):
         raise ValueError("binary sources must match the configured bundle contents")
     sources = {}
     for name, path in binaries.items():
@@ -68,8 +75,9 @@ def assemble(config, workspace, output_path, mode, app_identity, installer_ident
     icon_path = config["icon"]
     if not isinstance(icon_path, str):
         raise ValueError("icon path must be a string")
-    icon = workspace_path(workspace, icon_path, exists=False)
-    if not icon.is_file():
+    icon_candidate = workspace_path(workspace, icon_path, exists=False)
+    icon: Path | None = icon_candidate
+    if not icon_candidate.is_file():
         if mode == "signed":
             raise ValueError("signed packages require an icon")
         print("warning: icon is absent from the development package", file=sys.stderr)
@@ -102,24 +110,54 @@ def assemble(config, workspace, output_path, mode, app_identity, installer_ident
         shutil.copyfile(generated / "Info.plist", contents / "Info.plist")
         subprocess.run(["xattr", "-cr", str(app)], check=False)
         if mode in ("signed", "adhoc"):
-            signing_options = ["--force", "--timestamp", "--options", "runtime", "--sign", app_identity] if mode == "signed" else ["--force", "--sign", "-"]
+            signing_options = (
+                ["--force", "--timestamp", "--options", "runtime", "--sign", app_identity]
+                if mode == "signed"
+                else ["--force", "--sign", "-"]
+            )
             for name in metadata["binary_names"]:
                 run("codesign", *signing_options, str(macos / name))
             run("codesign", *signing_options, str(app))
             run("codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app))
         component_plist = work / "component.plist"
         run("pkgbuild", "--analyze", "--root", str(work / "root"), str(component_plist))
-        with component_plist.open("rb") as source:
-            components = plistlib.load(source)
-        if not isinstance(components, list) or len(components) != 1 or not isinstance(components[0], dict):
+        with component_plist.open("rb") as component_file:
+            components = plistlib.load(component_file)
+        if (
+            not isinstance(components, list)
+            or len(components) != 1
+            or not isinstance(components[0], dict)
+        ):
             raise ValueError("pkgbuild returned an unexpected component list")
         components[0]["BundleIsRelocatable"] = False
         with component_plist.open("wb") as target:
             plistlib.dump(components, target)
         component = work / "component.pkg"
         unsigned = work / "unsigned.pkg"
-        run("pkgbuild", "--root", str(work / "root"), "--component-plist", str(component_plist), "--identifier", metadata["bundle_id"], "--version", metadata["version"], "--install-location", "/", "--scripts", str(generated / "scripts"), str(component))
-        run("productbuild", "--distribution", str(generated / "distribution.xml"), "--package-path", str(work), str(unsigned))
+        run(
+            "pkgbuild",
+            "--root",
+            str(work / "root"),
+            "--component-plist",
+            str(component_plist),
+            "--identifier",
+            metadata["bundle_id"],
+            "--version",
+            metadata["version"],
+            "--install-location",
+            "/",
+            "--scripts",
+            str(generated / "scripts"),
+            str(component),
+        )
+        run(
+            "productbuild",
+            "--distribution",
+            str(generated / "distribution.xml"),
+            "--package-path",
+            str(work),
+            str(unsigned),
+        )
         package = unsigned
         if mode == "signed":
             package = work / "signed.pkg"
@@ -140,7 +178,14 @@ def main():
         workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve(strict=True)
         with args.config.open(encoding="utf-8") as source:
             config = json.load(source)
-        result = assemble(config, workspace, args.output, args.mode, os.environ.get("MACOS_APPLICATION_IDENTITY", ""), os.environ.get("MACOS_INSTALLER_IDENTITY", ""))
+        result = assemble(
+            config,
+            workspace,
+            args.output,
+            args.mode,
+            os.environ.get("MACOS_APPLICATION_IDENTITY", ""),
+            os.environ.get("MACOS_INSTALLER_IDENTITY", ""),
+        )
         output_file = os.environ.get("GITHUB_OUTPUT")
         if output_file:
             with open(output_file, "a", encoding="utf-8") as output:

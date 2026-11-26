@@ -3,6 +3,7 @@ set -euo pipefail
 
 artifact=${MACOS_NOTARIZE_ARTIFACT:?artifact is required}
 profile=${MACOS_NOTARIZE_PROFILE:?notary profile is required}
+keychain=${MACOS_NOTARIZE_KEYCHAIN:?keychain is required}
 format=${MACOS_NOTARIZE_FORMAT:?artifact format is required}
 
 case "$format" in
@@ -20,7 +21,7 @@ fi
 
 result=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/notarization.XXXXXXXX")
 trap 'rm -f "$result"' EXIT
-xcrun notarytool submit "$artifact" --keychain-profile "$profile" --wait --output-format json > "$result"
+xcrun notarytool submit "$artifact" --keychain-profile "$profile" --keychain "$keychain" --wait --output-format json > "$result"
 status=$(plutil -extract status raw -o - "$result")
 if [ "$status" != Accepted ]; then
     echo "Notarization did not succeed: $status" >&2

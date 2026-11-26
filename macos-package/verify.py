@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Verify a notarized macOS installer and optionally test its installation."""
+
 import argparse
 import json
 import os
 import subprocess
-import sys
 import tempfile
 import time
 from pathlib import Path
@@ -17,7 +17,9 @@ LOCAL_BIN = Path("/usr/local/bin")
 
 
 def command(*args, check=True):
-    return subprocess.run(args, check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    return subprocess.run(
+        args, check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    )
 
 
 def retry_stapler(package):
@@ -32,7 +34,11 @@ def retry_stapler(package):
 
 def assess(*args):
     result = command("spctl", "-a", "-vv", *args, check=False)
-    if result.returncode != 0 or "accepted" not in result.stdout or "Notarized Developer ID" not in result.stdout:
+    if (
+        result.returncode != 0
+        or "accepted" not in result.stdout
+        or "Notarized Developer ID" not in result.stdout
+    ):
         raise ValueError("Gatekeeper did not accept a notarized artifact")
 
 
@@ -100,7 +106,6 @@ def verify(package, metadata, install):
         raise primary_error
     if cleanup_errors:
         raise ValueError("; ".join(cleanup_errors))
-
 
 
 def main():

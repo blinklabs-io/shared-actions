@@ -72,7 +72,7 @@ action on the finished MSI before uploading it.
 ## macOS notarization
 
 The `macos-notarize` action submits a signed `pkg` or `zip` using an existing
-notarytool keychain profile. It requires an accepted notarization result. For a
+notarytool keychain profile and its `keychain` path. It requires an accepted notarization result. For a
 package, it staples and validates the ticket, retrying transient stapler
 failures. ZIP archives are submitted without stapling. The caller must upload
 and attest the same submitted artifact.
@@ -145,3 +145,22 @@ path is returned. The action restores signing keychain state even when a later
 step fails. Tag runs require signed mode. `unsigned` and `adhoc` modes are for
 package development builds. Callers must upload and attest the returned artifact
 only after the action succeeds.
+
+The desktop publisher accepts the optional `macos-release-config` input. When
+set, the configuration must describe a package, its `artifact_basename` must
+equal `application-name`, and `build.version_prefix` must be `strip` or omitted.
+The publisher rejects incompatible settings before building or signing. An empty
+input retains the existing desktop packaging contract.
+
+The reusable `reuseable-test-macos-release.yml` workflow builds a signed test
+artifact only on a manual dispatch from the caller's default branch. It uploads
+the verified artifact to the workflow run and does not publish a release.
+Governance configuration and generated caller workflows belong in
+`blinklabs-io/actions`; this repository owns the reusable implementations and
+their input, output, secret, and verification contracts. Product repositories
+own their source and assets. Callers provide credentials as declared secrets.
+
+Python helpers are checked with Ruff formatting and linting, mypy, and the
+Python behavior tests invoked by the Go test suite. Tool versions are pinned in
+`requirements-python-checks.txt`; `pyproject.toml` defines their scope and
+settings.

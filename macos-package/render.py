@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Render common macOS bundle metadata and installer hooks from product settings."""
+
 import argparse
 import json
 import plistlib
@@ -14,7 +15,7 @@ IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*\Z")
 VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]*\Z")
 
 
-def checked(value, pattern, label):
+def checked(value: object, pattern: re.Pattern[str], label: str) -> str:
     if not isinstance(value, str) or not pattern.fullmatch(value):
         raise ValueError(f"invalid {label}")
     return value
@@ -23,7 +24,20 @@ def checked(value, pattern, label):
 def render(config, output):
     if not isinstance(config, dict):
         raise ValueError("configuration must be an object")
-    allowed = {"application_name", "bundle_id", "executable", "icon_name", "version", "architecture", "binary_names", "cli_symlink", "minimum_macos", "description", "organization", "notification_alert_style"}
+    allowed = {
+        "application_name",
+        "bundle_id",
+        "executable",
+        "icon_name",
+        "version",
+        "architecture",
+        "binary_names",
+        "cli_symlink",
+        "minimum_macos",
+        "description",
+        "organization",
+        "notification_alert_style",
+    }
     if set(config) - allowed:
         raise ValueError("unknown package metadata setting")
     name = checked(config.get("application_name"), NAME, "application name")
@@ -40,7 +54,10 @@ def render(config, output):
         raise ValueError("binary_names must be a nonempty list")
     for binary in binary_names:
         checked(binary, NAME, "binary name")
-    if len(set(binary_names)) != len(binary_names) or executable not in binary_names:
+    if (
+        len({name.lower() for name in binary_names}) != len(binary_names)
+        or executable not in binary_names
+    ):
         raise ValueError("binary names must be unique and include the bundle executable")
     cli = config.get("cli_symlink", "")
     if not isinstance(cli, str):
@@ -54,12 +71,19 @@ def render(config, output):
         raise ValueError("invalid minimum macOS version")
     description = config.get("description", name)
     organization = config.get("organization", identifier.rpartition(".")[0])
-    if not isinstance(description, str) or not description or not isinstance(organization, str) or not IDENTIFIER.fullmatch(organization):
+    if (
+        not isinstance(description, str)
+        or not description
+        or not isinstance(organization, str)
+        or not IDENTIFIER.fullmatch(organization)
+    ):
         raise ValueError("invalid installer description or organization")
     notification = config.get("notification_alert_style", "")
     if notification not in ("", "alert", "banner", "none"):
         raise ValueError("invalid notification alert style")
 
+    match = re.match(r"^([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?", version)
+    short_version = ".".join(part or "0" for part in match.groups()) if match else "0.0.0"
     output.mkdir(parents=True, exist_ok=True)
     plist = {
         "CFBundleExecutable": executable,
@@ -68,7 +92,7 @@ def render(config, output):
         "CFBundleName": name,
         "CFBundleDisplayName": name,
         "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": version,
+        "CFBundleShortVersionString": short_version,
         "CFBundleVersion": version,
         "LSMinimumSystemVersion": minimum,
         "LSUIElement": False,
@@ -81,42 +105,57 @@ def render(config, output):
     root = ET.Element("installer-gui-script", {"minSpecVersion": "2"})
     ET.SubElement(root, "title").text = name
     ET.SubElement(root, "organization").text = organization
-    ET.SubElement(root, "options", {"customize": "never", "require-scripts": "false", "rootVolumeOnly": "true", "hostArchitectures": architectures[architecture]})
+    ET.SubElement(
+        root,
+        "options",
+        {
+            "customize": "never",
+            "require-scripts": "false",
+            "rootVolumeOnly": "true",
+            "hostArchitectures": architectures[architecture],
+        },
+    )
     volume = ET.SubElement(root, "volume-check")
-    allowed = ET.SubElement(volume, "allowed-os-versions")
-    ET.SubElement(allowed, "os-version", {"min": minimum})
+    allowed_versions = ET.SubElement(volume, "allowed-os-versions")
+    ET.SubElement(allowed_versions, "os-version", {"min": minimum})
     outline = ET.SubElement(root, "choices-outline")
     line = ET.SubElement(outline, "line", {"choice": "default"})
     ET.SubElement(line, "line", {"choice": identifier})
     ET.SubElement(root, "choice", {"id": "default"})
-    choice = ET.SubElement(root, "choice", {"id": identifier, "visible": "false", "title": name, "description": description})
+    choice = ET.SubElement(
+        root,
+        "choice",
+        {"id": identifier, "visible": "false", "title": name, "description": description},
+    )
     ET.SubElement(choice, "pkg-ref", {"id": identifier})
-    ET.SubElement(root, "pkg-ref", {"id": identifier, "version": version, "onConclusion": "none"}).text = "component.pkg"
+    ET.SubElement(
+        root, "pkg-ref", {"id": identifier, "version": version, "onConclusion": "none"}
+    ).text = "component.pkg"
     ET.ElementTree(root).write(output / "distribution.xml", encoding="utf-8", xml_declaration=True)
 
     scripts = output / "scripts"
     scripts.mkdir(exist_ok=True)
     app_path = f"/Applications/{name}.app"
-    preinstall = f'''#!/bin/bash
+    preinstall = f"""#!/bin/bash
 set -u
 APP_PATH={shlex.quote(app_path)}
 if [ -d "$APP_PATH" ]; then
     /usr/bin/osascript -e {shlex.quote(f'tell application "{name}" to quit')} >/dev/null 2>&1 || true
     _binary="$APP_PATH/Contents/MacOS/{executable}"
-    /usr/bin/pkill -f "${{_binary//./\\.}}" >/dev/null 2>&1 || true
+    /usr/bin/pkill -f "^${{_binary//./\\.}}( |$)" >/dev/null 2>&1 || true
 fi
 exit 0
-'''
-    postinstall = f'''#!/bin/bash
+"""
+    postinstall = f"""#!/bin/bash
 set -u
 APP_PATH={shlex.quote(app_path)}
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 if [ -x "$LSREGISTER" ] && [ -d "$APP_PATH" ]; then
     "$LSREGISTER" -f "$APP_PATH" >/dev/null 2>&1 || true
 fi
-'''
+"""
     if cli:
-        postinstall += f'''CLI_SRC="$APP_PATH/Contents/MacOS/{cli}"
+        postinstall += f"""CLI_SRC="$APP_PATH/Contents/MacOS/{cli}"
 CLI_LINK=/usr/local/bin/{cli}
 if [ -x "$CLI_SRC" ]; then
     /bin/mkdir -p /usr/local/bin 2>/dev/null || true
@@ -128,7 +167,7 @@ if [ -x "$CLI_SRC" ]; then
 else
     echo "postinstall: CLI binary not found at $CLI_SRC; skipping symlink" >&2
 fi
-'''
+"""
     postinstall += "exit 0\n"
     for filename, content in (("preinstall", preinstall), ("postinstall", postinstall)):
         path = scripts / filename

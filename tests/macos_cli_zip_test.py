@@ -9,7 +9,14 @@ SCRIPT = Path(__file__).resolve().parent.parent / "macos-package" / "sign-zip.py
 
 
 class CLIZipTests(unittest.TestCase):
-    def run_case(self, fail="", binary="bursa", identifier="com.blinklabssoftware.bursa", existing=False, symlink=False):
+    def run_case(
+        self,
+        fail="",
+        binary="bursa",
+        identifier="com.blinklabssoftware.bursa",
+        existing=False,
+        symlink=False,
+    ):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         root = Path(temp.name)
@@ -24,7 +31,7 @@ class CLIZipTests(unittest.TestCase):
         tools.mkdir()
         log = root / "calls"
         codesign = tools / "codesign"
-        codesign.write_text('''#!/usr/bin/env python3
+        codesign.write_text("""#!/usr/bin/env python3
 import os, pathlib, sys
 with open(os.environ["COMMAND_LOG"], "a") as output:
     output.write("codesign " + " ".join(sys.argv[1:]) + "\\n")
@@ -32,10 +39,10 @@ if os.environ.get("FAIL_COMMAND") == "codesign" or (os.environ.get("FAIL_COMMAND
     sys.exit(7)
 if "--verify" not in sys.argv:
     pathlib.Path(sys.argv[-1]).write_bytes(b"signed")
-''')
+""")
         codesign.chmod(0o755)
         zip_command = tools / "zip"
-        zip_command.write_text('''#!/usr/bin/env python3
+        zip_command.write_text("""#!/usr/bin/env python3
 import os, sys, zipfile
 with open(os.environ["COMMAND_LOG"], "a") as output:
     output.write("zip " + " ".join(sys.argv[1:]) + "\\n")
@@ -43,14 +50,27 @@ if os.environ.get("FAIL_COMMAND") == "zip":
     sys.exit(7)
 with zipfile.ZipFile(sys.argv[2], "w") as archive:
     archive.write(sys.argv[3])
-''')
+""")
         zip_command.chmod(0o755)
         if existing:
             (workspace / "release.zip").write_bytes(b"keep")
         output = root / "output"
         output.write_text("")
-        env = os.environ | {"GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(output), "MACOS_APPLICATION_IDENTITY": "Test Identity", "COMMAND_LOG": str(log), "FAIL_COMMAND": fail, "PATH": str(tools) + os.pathsep + os.environ["PATH"], "PYTHONDONTWRITEBYTECODE": "1"}
-        result = subprocess.run(["python3", str(SCRIPT), binary, "release.zip", identifier], env=env, text=True, capture_output=True)
+        env = os.environ | {
+            "GITHUB_WORKSPACE": str(workspace),
+            "GITHUB_OUTPUT": str(output),
+            "MACOS_APPLICATION_IDENTITY": "Test Identity",
+            "COMMAND_LOG": str(log),
+            "FAIL_COMMAND": fail,
+            "PATH": str(tools) + os.pathsep + os.environ["PATH"],
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        result = subprocess.run(
+            ["python3", str(SCRIPT), binary, "release.zip", identifier],
+            env=env,
+            text=True,
+            capture_output=True,
+        )
         calls = log.read_text() if log.exists() else ""
         return result, calls, workspace, output
 

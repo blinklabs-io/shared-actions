@@ -63,6 +63,18 @@ func TestMacOSPilotIsManualAndDefaultBranchOnly(t *testing.T) {
 			if step.With["mode"] != "signed" {
 				t.Fatal("pilot must require signed mode")
 			}
+			for input, value := range map[string]string{
+				"config": "${{ inputs.config }}", "architecture": "${{ inputs.architecture }}",
+				"signing-organization":    "${{ inputs.signing-organization }}",
+				"application-certificate": "${{ secrets.apple-certificate }}", "application-password": "${{ secrets.apple-certificate-password }}",
+				"installer-certificate": "${{ secrets.apple-installer-certificate }}", "installer-password": "${{ secrets.apple-installer-certificate-password }}",
+				"keychain-password": "${{ secrets.apple-keychain-password }}", "apple-id": "${{ secrets.apple-id }}",
+				"apple-password": "${{ secrets.apple-app-specific-password }}", "team-id": "${{ secrets.apple-team-id }}",
+			} {
+				if step.With[input] != value {
+					t.Errorf("pilot input %s is not mapped correctly", input)
+				}
+			}
 		}
 		if strings.HasPrefix(step.Uses, "actions/upload-artifact@") {
 			upload = true

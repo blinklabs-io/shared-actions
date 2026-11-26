@@ -7,6 +7,9 @@ inputs:
   profile:
     description: Keychain profile containing notarization credentials.
     required: true
+  keychain:
+    description: Temporary keychain containing the profile.
+    required: true
   format:
     description: Artifact format, pkg or zip.
     required: true
@@ -18,5 +21,6 @@ runs:
       env:
         MACOS_NOTARIZE_ARTIFACT: ${{ inputs.artifact }}
         MACOS_NOTARIZE_PROFILE: ${{ inputs.profile }}
+        MACOS_NOTARIZE_KEYCHAIN: ${{ inputs.keychain }}
         MACOS_NOTARIZE_FORMAT: ${{ inputs.format }}
       run: 'bash "$GITHUB_ACTION_PATH/notarize.sh"'

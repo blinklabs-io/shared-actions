@@ -1,6 +1,5 @@
 import json
 import os
-import plistlib
 import subprocess
 import tempfile
 import unittest
@@ -19,7 +18,7 @@ class PackageAssemblyTests(unittest.TestCase):
         bin_dir = root / "tools"
         bin_dir.mkdir()
         log = root / "commands.jsonl"
-        stub = '''#!/usr/bin/env python3
+        stub = """#!/usr/bin/env python3
 import json, os, pathlib, plistlib, sys
 name = pathlib.Path(sys.argv[0]).name
 with open(os.environ["COMMAND_LOG"], "a") as f:
@@ -36,7 +35,7 @@ elif name == "pkgbuild":
     pathlib.Path(sys.argv[-1]).write_bytes(b"component")
 elif name in ("productbuild", "productsign"):
     pathlib.Path(sys.argv[-1]).write_bytes(b"package")
-'''
+"""
         for name in ("xattr", "codesign", "pkgbuild", "productbuild", "productsign", "pkgutil"):
             path = bin_dir / name
             path.write_text(stub)
@@ -47,11 +46,16 @@ elif name in ("productbuild", "productsign"):
         (workspace / "icon.icns").write_bytes(b"icon")
         config = {
             "metadata": {
-                "application_name": product, "bundle_id": "io.example." + product.lower(),
-                "executable": binary_names[-1], "icon_name": product.lower(),
-                "version": "1.2.3", "architecture": "arm64", "binary_names": binary_names,
+                "application_name": product,
+                "bundle_id": "io.example." + product.lower(),
+                "executable": binary_names[-1],
+                "icon_name": product.lower(),
+                "version": "1.2.3",
+                "architecture": "arm64",
+                "binary_names": binary_names,
             },
-            "binaries": {name: name for name in binary_names}, "icon": "icon.icns",
+            "binaries": {name: name for name in binary_names},
+            "icon": "icon.icns",
         }
         if settings_update:
             settings_update(config, workspace)
@@ -69,17 +73,27 @@ if os.environ.get('FAIL_PUBLISH'):
         action_output = root / "action-output"
         action_output.write_text("")
         env = os.environ | {
-            "GITHUB_WORKSPACE": str(workspace), "GITHUB_OUTPUT": str(action_output), "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
-            "COMMAND_LOG": str(log), "FAIL_COMMAND": fail_command, "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONPATH": str(root), "FAIL_PUBLISH": fail_publish,
-            "MACOS_APPLICATION_IDENTITY": "Application Identity", "MACOS_INSTALLER_IDENTITY": "Installer Identity",
+            "GITHUB_WORKSPACE": str(workspace),
+            "GITHUB_OUTPUT": str(action_output),
+            "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+            "COMMAND_LOG": str(log),
+            "FAIL_COMMAND": fail_command,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPATH": str(root),
+            "FAIL_PUBLISH": fail_publish,
+            "MACOS_APPLICATION_IDENTITY": "Application Identity",
+            "MACOS_INSTALLER_IDENTITY": "Installer Identity",
         }
         args = ["python3", str(ASSEMBLER), str(config_path), "dist/release.pkg"]
         if signed:
             args.extend(["--mode", signed if isinstance(signed, str) else "signed"])
         result = subprocess.run(args, env=env, text=True, capture_output=True)
         calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
-        expected_output = f"package={(workspace / 'dist/release.pkg').resolve()}\n" if result.returncode == 0 else ""
+        expected_output = (
+            f"package={(workspace / 'dist/release.pkg').resolve()}\n"
+            if result.returncode == 0
+            else ""
+        )
         self.assertEqual(action_output.read_text(), expected_output)
         return result, calls, workspace
 
@@ -119,6 +133,7 @@ if os.environ.get('FAIL_PUBLISH'):
     def test_missing_icon_is_allowed_only_for_development(self):
         def remove_icon(config, workspace):
             (workspace / "icon.icns").unlink()
+
         for mode in (False, "adhoc", True):
             with self.subTest(mode=mode):
                 result, _, workspace = self.run_case("Adder", mode, settings_update=remove_icon)
@@ -145,12 +160,22 @@ if os.environ.get('FAIL_PUBLISH'):
     def test_rejects_unsafe_or_missing_inputs(self):
         def outside(config, workspace):
             config["binaries"]["adder"] = "../outside"
+
         def missing(config, workspace):
             config["binaries"]["adder"] = "missing"
+
         def preexisting(config, workspace):
             (workspace / "dist").mkdir()
             (workspace / "dist/release.pkg").write_bytes(b"keep")
-        for change in (outside, missing, preexisting):
+
+        def newline_target(config, workspace):
+            target = workspace / "directory\nwith-newline"
+            target.mkdir()
+            (target / "binary").write_bytes(b"binary")
+            (workspace / "safe-link").symlink_to(target, target_is_directory=True)
+            config["binaries"]["adder"] = "safe-link/binary"
+
+        for change in (outside, missing, preexisting, newline_target):
             with self.subTest(change=change.__name__):
                 result, calls, workspace = self.run_case("Adder", True, settings_update=change)
                 self.assertNotEqual(result.returncode, 0)

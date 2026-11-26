@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Save, extend and restore the macOS user keychain search list."""
+
 import json
 import os
 import shlex
@@ -10,7 +11,12 @@ from pathlib import Path
 
 def main():
     if sys.argv[1:] == ["default"]:
-        result = subprocess.run(["security", "default-keychain", "-d", "user"], check=True, text=True, stdout=subprocess.PIPE)
+        result = subprocess.run(
+            ["security", "default-keychain", "-d", "user"],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+        )
         paths = shlex.split(result.stdout)
         if len(paths) != 1 or not paths[0].startswith("/") or "\n" in paths[0] or "\r" in paths[0]:
             raise ValueError("invalid default keychain")
@@ -21,7 +27,12 @@ def main():
     operation = sys.argv[1]
     snapshot = Path(sys.argv[2])
     if operation == "snapshot" and len(sys.argv) == 3:
-        result = subprocess.run(["security", "list-keychains", "-d", "user"], check=True, text=True, stdout=subprocess.PIPE)
+        result = subprocess.run(
+            ["security", "list-keychains", "-d", "user"],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+        )
         paths = shlex.split(result.stdout)
         if any(not path.startswith("/") or "\n" in path or "\r" in path for path in paths):
             raise ValueError("invalid keychain path in search list")
@@ -31,7 +42,10 @@ def main():
     elif operation in ("extend", "restore"):
         with snapshot.open(encoding="utf-8") as source:
             paths = json.load(source)
-        if not isinstance(paths, list) or any(not isinstance(path, str) or not path.startswith("/") or "\n" in path or "\r" in path for path in paths):
+        if not isinstance(paths, list) or any(
+            not isinstance(path, str) or not path.startswith("/") or "\n" in path or "\r" in path
+            for path in paths
+        ):
             raise ValueError("invalid keychain search-list snapshot")
         if operation == "extend" and len(sys.argv) == 4:
             keychain = sys.argv[3]

@@ -113,6 +113,7 @@ runs:
       with:
         artifact: ${{ steps.package.outputs.package || steps.zip.outputs.archive }}
         profile: ${{ steps.signing.outputs.notary-profile }}
+        keychain: ${{ steps.signing.outputs.keychain }}
         format: ${{ steps.prepare.outputs.artifact-type }}
     - name: Verify notarized installer
       if: inputs.mode == 'signed' && steps.prepare.outputs.artifact-type == 'pkg'

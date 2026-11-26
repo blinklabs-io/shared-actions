@@ -71,7 +71,7 @@ print(result["status"], end="")
 			}
 			log := filepath.Join(dir, "calls")
 			cmd := exec.CommandContext(t.Context(), "bash", script)
-			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "MACOS_NOTARIZE_ARTIFACT="+artifact, "MACOS_NOTARIZE_PROFILE=test-profile", "MACOS_NOTARIZE_FORMAT="+tc.format, "TEST_LOG="+log, "TEST_STATUS="+tc.status, "TEST_FAILURE="+tc.failure)
+			cmd.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "MACOS_NOTARIZE_ARTIFACT="+artifact, "MACOS_NOTARIZE_PROFILE=test-profile", "MACOS_NOTARIZE_KEYCHAIN=test-keychain", "MACOS_NOTARIZE_FORMAT="+tc.format, "TEST_LOG="+log, "TEST_STATUS="+tc.status, "TEST_FAILURE="+tc.failure)
 			output, err := cmd.CombinedOutput()
 			if (err == nil) != tc.wantSuccess {
 				t.Fatalf("unexpected result %v: %s", err, output)
@@ -97,7 +97,7 @@ print(result["status"], end="")
 			if strings.Contains(calls, "stapler") != tc.wantStapler {
 				t.Fatalf("unexpected stapler calls: %s", calls)
 			}
-			if tc.wantSuccess && !strings.Contains(calls, "notarytool submit "+artifact+" --keychain-profile test-profile --wait --output-format json") {
+			if tc.wantSuccess && !strings.Contains(calls, "notarytool submit "+artifact+" --keychain-profile test-profile --keychain test-keychain --wait --output-format json") {
 				t.Fatalf("incorrect submission: %s", calls)
 			}
 			if tc.wantSuccess && tc.format == "pkg" && (!strings.Contains(calls, "stapler staple "+artifact) || !strings.Contains(calls, "stapler validate "+artifact)) {
