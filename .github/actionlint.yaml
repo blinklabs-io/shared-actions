@@ -11,3 +11,6 @@ paths:
   .github/workflows/reuseable-publish-desktop.yml:
     ignore:
       - 'specifying action "\$/macos-release" in invalid format because ref is missing'
+  .github/workflows/reuseable-test-macos-release.yml:
+    ignore:
+      - 'specifying action "\$/macos-release" in invalid format because ref is missing'

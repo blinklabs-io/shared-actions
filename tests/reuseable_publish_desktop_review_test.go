@@ -21,6 +21,7 @@ type desktopWorkflow struct {
 	} `yaml:"on"`
 	Jobs map[string]struct {
 		If          string            `yaml:"if"`
+		RunsOn      string            `yaml:"runs-on"`
 		Needs       yaml.Node         `yaml:"needs"`
 		Permissions map[string]string `yaml:"permissions"`
 		Strategy    struct {
