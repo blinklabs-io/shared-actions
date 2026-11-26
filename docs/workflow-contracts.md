@@ -102,3 +102,10 @@ and `adhoc` modes support development builds. Assembly publishes the completed
 package without overwriting an existing output. A signed release must pass the
 result through notarization and package verification before upload and
 attestation. The action emits the resulting absolute path as `package`.
+
+The `macos-package/verify` action checks the package's Developer ID Installer
+signature, Gatekeeper assessment, and stapled ticket. Its default installation
+check is for disposable runners. It refuses to replace a pre-existing app or
+receipt, checks each installed binary's signature and architecture, and removes
+the installation, its receipt and any CLI link created by the test. Set
+`install` to `false` when only signature and notarization checks are desired.
