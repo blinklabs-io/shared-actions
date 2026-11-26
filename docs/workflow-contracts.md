@@ -76,3 +76,14 @@ notarytool keychain profile. It requires an accepted notarization result. For a
 package, it staples and validates the ticket, retrying transient stapler
 failures. ZIP archives are submitted without stapling. The caller must upload
 and attest the same submitted artifact.
+
+The `macos-signing-setup` action imports a Developer ID Application identity
+and, for package releases, a Developer ID Installer identity. It creates a
+private temporary keychain and notarytool profile. A caller must run
+`macos-signing-cleanup` after successful setup, including when a later build,
+notarization, verification or upload step fails. Pass the setup action's
+`keychain` and `original-keychain` outputs to cleanup and guard that step with
+`always()` and the setup step's success outcome. The cleanup restores the
+original default keychain and deletes the temporary keychain. Application and
+installer certificate passwords and the Apple credentials are supplied by the
+caller as secrets.
