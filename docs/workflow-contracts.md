@@ -87,3 +87,18 @@ notarization, verification or upload step fails. Pass the setup action's
 original default keychain and deletes the temporary keychain. Application and
 installer certificate passwords and the Apple credentials are supplied by the
 caller as secrets.
+
+The `macos-package` action assembles an installer from prebuilt binaries inside
+the checked-out workspace. Its JSON `config` contains a `metadata` object,
+a `binaries` mapping from each bundled executable name to a workspace-relative
+source path, and an `icon` path. Metadata includes `application_name`,
+`bundle_id`, `executable`, `icon_name`, `version`, `architecture`, and
+`binary_names`. Optional settings include `cli_symlink`, `minimum_macos`,
+`description`, `organization`, and `notification_alert_style`.
+
+The default `signed` mode requires both Developer ID identities, signs the
+binaries, bundle and package, and verifies their signatures. The `unsigned`
+and `adhoc` modes support development builds. Assembly publishes the completed
+package without overwriting an existing output. A signed release must pass the
+result through notarization and package verification before upload and
+attestation. The action emits the resulting absolute path as `package`.
