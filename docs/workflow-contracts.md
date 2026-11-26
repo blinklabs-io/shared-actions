@@ -110,3 +110,9 @@ check is for disposable runners. It refuses to replace a pre-existing app or
 receipt, checks each installed binary's signature and architecture, and removes
 the installation, its receipt and any CLI link created by the test. Set
 `install` to `false` when only signature and notarization checks are desired.
+
+The `macos-package/sign-zip` action signs and verifies a workspace-contained CLI
+executable, then creates a ZIP containing the signed copy under the configured
+binary's name. It leaves the input unchanged and publishes the archive without
+overwriting an existing file. Submit the resulting `archive` output to
+`macos-notarize` with `format: zip`, and upload and attest that same ZIP.

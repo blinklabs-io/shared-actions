@@ -30,6 +30,19 @@ def run(*args, **kwargs):
     subprocess.run(args, check=True, **kwargs)
 
 
+def publish_atomic(source_path, output):
+    descriptor, staged_name = tempfile.mkstemp(prefix=".macos-package-", dir=output.parent)
+    staged = Path(staged_name)
+    try:
+        with os.fdopen(descriptor, "wb") as target:
+            os.fchmod(target.fileno(), 0o644)
+            with source_path.open("rb") as source:
+                shutil.copyfileobj(source, target)
+        os.link(staged, output)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def assemble(config, workspace, output_path, mode, app_identity, installer_identity):
     if not isinstance(config, dict) or set(config) != {"metadata", "binaries", "icon"}:
         raise ValueError("expected metadata, binaries and icon settings")
@@ -113,16 +126,7 @@ def assemble(config, workspace, output_path, mode, app_identity, installer_ident
             run("productsign", "--sign", installer_identity, str(unsigned), str(package))
             run("pkgutil", "--check-signature", str(package))
         output.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, staged_name = tempfile.mkstemp(prefix=".macos-package-", dir=output.parent)
-        staged = Path(staged_name)
-        try:
-            with os.fdopen(descriptor, "wb") as target:
-                os.fchmod(target.fileno(), 0o644)
-                with package.open("rb") as source:
-                    shutil.copyfileobj(source, target)
-            os.link(staged, output)
-        finally:
-            staged.unlink(missing_ok=True)
+        publish_atomic(package, output)
     return output
 
 
