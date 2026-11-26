@@ -50,7 +50,7 @@ class MacOSReleaseSettingsTests(unittest.TestCase):
     def test_bursa_wallet_package_settings(self):
         self.config = {
             "artifact_type": "pkg", "artifact_basename": "bursa-wallet",
-            "build": {"binaries": [{"name": "bursa-wallet", "module": "ui", "package": "./cmd/bursa-wallet", "cgo": True, "tags": ["webview"]}], "web": {"directory": "ui/web", "dist": "ui/web/dist", "embed": "ui/internal/webui/dist", "reuse": True, "placeholder": "Pre-build placeholder"}},
+            "build": {"binaries": [{"name": "bursa-wallet", "module": "ui", "package": "./cmd/bursa-wallet", "cgo": True, "tags": ["webview"]}], "web": {"directory": "ui/web", "dist": "ui/web/dist", "embed": "ui/internal/webui/dist", "reuse": False, "placeholder": "Pre-build placeholder"}},
             "metadata": {"application_name": "Bursa", "bundle_id": "com.blinklabssoftware.bursa", "executable": "bursa-wallet", "icon_name": "bursa"},
             "icon": ".github/assets/Bursa.icns",
         }
