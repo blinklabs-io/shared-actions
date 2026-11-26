@@ -8,3 +8,6 @@ paths:
   .github/workflows/test-macos-package.yml:
     ignore:
       - 'specifying action "\$/(macos-package(/build)?|macos-release)" in invalid format because ref is missing'
+  .github/workflows/reuseable-publish-desktop.yml:
+    ignore:
+      - 'specifying action "\$/macos-release" in invalid format because ref is missing'
