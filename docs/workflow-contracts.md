@@ -164,3 +164,13 @@ Python helpers are checked with Ruff formatting and linting, mypy, and the
 Python behavior tests invoked by the Go test suite. Tool versions are pinned in
 `requirements-python-checks.txt`; `pyproject.toml` defines their scope and
 settings.
+
+## Governed release orchestration
+
+The `reuseable-release-draft.yml` stage validates release tags and only creates
+or reuses a draft owned by the current workflow run. On a manual dispatch it
+requires the caller's default branch and creates no release. The reusable exposes
+the draft ID through `release-id` for later publishing stages; callers must pass
+that ID only to jobs gated on successful preparation. The caller grants
+`contents: write` to the stage. Tags use `v` followed by a three-part semantic
+version, optionally with a prerelease suffix; build metadata is not accepted.
