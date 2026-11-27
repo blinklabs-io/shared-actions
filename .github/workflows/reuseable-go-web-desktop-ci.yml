@@ -1,0 +1,296 @@
+name: Reusable Go Web Desktop CI
+
+on:
+  workflow_call:
+    inputs:
+      web-directory:
+        description: Workspace-relative npm web project directory.
+        required: true
+        type: string
+      web-dist-directory:
+        description: Workspace-relative web build output directory.
+        required: true
+        type: string
+      extension-directory:
+        description: Workspace-relative browser extension project directory; empty disables extension checks.
+        type: string
+        default: ''
+      extension-name:
+        description: Browser extension package filename prefix.
+        type: string
+        default: ''
+      go-directory:
+        description: Workspace-relative Go UI module directory.
+        required: true
+        type: string
+      go-versions:
+        description: JSON array of Go versions to test.
+        type: string
+        default: '["1.26.x"]'
+      go-packages:
+        description: Space-separated Go package patterns for vet, tests and lint.
+        type: string
+        default: './...'
+      go-build-package:
+        description: Go package to compile.
+        required: true
+        type: string
+      node-version:
+        description: Node.js version.
+        type: string
+        default: '22'
+      windows-test-package:
+        description: Go package for native Windows tests; empty disables the job.
+        type: string
+        default: ''
+      windows-test-filter:
+        description: Go test selection expression for native Windows tests.
+        type: string
+        default: ''
+      webview-target:
+        description: Make target for native webview builds; empty disables those jobs.
+        type: string
+        default: ''
+      web-artifact-name:
+        description: Run-scoped name of the web build artifact.
+        type: string
+        default: ui-web-dist
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate project settings
+        env:
+          WEB_DIRECTORY: ${{ inputs.web-directory }}
+          WEB_DIST_DIRECTORY: ${{ inputs.web-dist-directory }}
+          EXTENSION_DIRECTORY: ${{ inputs.extension-directory }}
+          EXTENSION_NAME: ${{ inputs.extension-name }}
+          GO_DIRECTORY: ${{ inputs.go-directory }}
+          GO_BUILD_PACKAGE: ${{ inputs.go-build-package }}
+          WINDOWS_TEST_PACKAGE: ${{ inputs.windows-test-package }}
+          WEBVIEW_TARGET: ${{ inputs.webview-target }}
+        run: |
+          set -euo pipefail
+          safe_path() {
+            [[ "$1" =~ ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$ ]] && [[ "/$1/" != *"/../"* ]]
+          }
+          for path in "$WEB_DIRECTORY" "$WEB_DIST_DIRECTORY" "$GO_DIRECTORY"; do
+            if ! safe_path "$path"; then echo '::error::Invalid project path' >&2; exit 1; fi
+          done
+          if [[ -n "$EXTENSION_DIRECTORY" ]]; then
+            if ! safe_path "$EXTENSION_DIRECTORY" || [[ ! "$EXTENSION_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+              echo '::error::Invalid extension settings' >&2; exit 1
+            fi
+          elif [[ -n "$EXTENSION_NAME" ]]; then
+            echo '::error::Extension name requires an extension directory' >&2; exit 1
+          fi
+          if [[ ! "$GO_BUILD_PACKAGE" =~ ^\./[A-Za-z0-9_./-]+$ || "/$GO_BUILD_PACKAGE/" == *"/../"* ]]; then
+            echo '::error::Invalid Go build package' >&2; exit 1
+          fi
+          if [[ -n "$WINDOWS_TEST_PACKAGE" ]] && { [[ ! "$WINDOWS_TEST_PACKAGE" =~ ^\./[A-Za-z0-9_./-]+$ ]] || [[ "/$WINDOWS_TEST_PACKAGE/" == *"/../"* ]]; }; then
+            echo '::error::Invalid Windows test package' >&2; exit 1
+          fi
+          if [[ -n "$WEBVIEW_TARGET" && ! "$WEBVIEW_TARGET" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo '::error::Invalid webview target' >&2; exit 1
+          fi
+
+  web:
+    name: web
+    needs: [validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Install and check web project
+        working-directory: ${{ inputs.web-directory }}
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run type-check
+          npm run test
+          npm run build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.web-artifact-name }}
+          path: ${{ inputs.web-dist-directory }}
+          if-no-files-found: error
+
+  extension:
+    if: inputs.extension-directory != ''
+    name: extension (${{ matrix.browser }})
+    needs: [validate]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        browser: [chrome, firefox]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Install and check extension
+        working-directory: ${{ inputs.extension-directory }}
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run type-check
+          npm run test
+      - name: Build Chrome package
+        if: matrix.browser == 'chrome'
+        working-directory: ${{ inputs.extension-directory }}
+        run: npm run build
+      - name: Build and lint Firefox package
+        if: matrix.browser == 'firefox'
+        working-directory: ${{ inputs.extension-directory }}
+        run: npm run package
+      - name: Install Chromium
+        if: matrix.browser == 'chrome'
+        working-directory: ${{ inputs.extension-directory }}
+        run: npm exec playwright install --with-deps --no-shell chromium
+      - name: Browser end-to-end tests
+        working-directory: ${{ inputs.extension-directory }}
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: npm run "test:e2e:${BROWSER}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ format('{0}-{1}', inputs.extension-name, matrix.browser) }}
+          path: ${{ format('{0}/dist/{1}-{2}-*.zip', inputs.extension-directory, inputs.extension-name, matrix.browser) }}
+          if-no-files-found: error
+
+  ui-go:
+    name: ui-go
+    needs: [web]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ${{ fromJSON(inputs.go-versions) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ matrix.go-version }}
+          check-latest: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.web-artifact-name }}
+          path: ${{ inputs.web-dist-directory }}
+      - name: Vet and test Go UI
+        working-directory: ${{ inputs.go-directory }}
+        env:
+          GO_PACKAGES: ${{ inputs.go-packages }}
+        run: |
+          set -euo pipefail
+          if [[ "$GO_PACKAGES" == *$'\n'* || "$GO_PACKAGES" == *$'\r'* ]]; then echo '::error::Invalid Go package patterns' >&2; exit 1; fi
+          read -r -a packages <<< "$GO_PACKAGES"
+          if (( ${#packages[@]} == 0 )); then echo '::error::Go packages are required' >&2; exit 1; fi
+          for package in "${packages[@]}"; do
+            if [[ ! "$package" =~ ^\.[/A-Za-z0-9_.-]*$ || "/$package/" == *"/../"* ]]; then echo '::error::Invalid Go package pattern' >&2; exit 1; fi
+          done
+          go vet "${packages[@]}"
+          go test "${packages[@]}"
+      - name: Build Go UI
+        working-directory: ${{ inputs.go-directory }}
+        env:
+          GO_BUILD_PACKAGE: ${{ inputs.go-build-package }}
+        run: go build "$GO_BUILD_PACKAGE"
+
+  ui-windows:
+    if: inputs.windows-test-package != ''
+    name: ui-windows
+    needs: [validate]
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ${{ fromJSON(inputs.go-versions) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ matrix.go-version }}
+          check-latest: true
+      - name: Test Go UI on Windows
+        working-directory: ${{ inputs.go-directory }}
+        env:
+          WINDOWS_TEST_FILTER: ${{ inputs.windows-test-filter }}
+          WINDOWS_TEST_PACKAGE: ${{ inputs.windows-test-package }}
+        run: go test -v -run "$env:WINDOWS_TEST_FILTER" "$env:WINDOWS_TEST_PACKAGE"
+
+  ui-webview:
+    if: inputs.webview-target != ''
+    name: ui-webview (${{ matrix.os }})
+    needs: [ui-go]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+          - runner: macos-15
+            os: darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: ${{ format('{0}/go.mod', inputs.go-directory) }}
+          check-latest: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.web-artifact-name }}
+          path: ${{ inputs.web-dist-directory }}
+      - name: Install Linux webview dependencies
+        if: matrix.os == 'linux'
+        run: |
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99network-timeouts >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Build native webview
+        env:
+          WEBVIEW_TARGET: ${{ inputs.webview-target }}
+        run: make -- "$WEBVIEW_TARGET"
+
+  ui-lint:
+    name: ui-lint
+    needs: [ui-go]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: ${{ format('{0}/go.mod', inputs.go-directory) }}
+          check-latest: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.web-artifact-name }}
+          path: ${{ inputs.web-dist-directory }}
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          working-directory: ${{ inputs.go-directory }}
+          args: ${{ inputs.go-packages }}

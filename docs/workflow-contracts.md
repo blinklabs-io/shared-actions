@@ -174,3 +174,22 @@ the draft ID through `release-id` for later publishing stages; callers must pass
 that ID only to jobs gated on successful preparation. The caller grants
 `contents: write` to the stage. Tags use `v` followed by a three-part semantic
 version, optionally with a prerelease suffix; build metadata is not accepted.
+
+## Governed web and desktop checks
+
+`reuseable-go-web-desktop-ci.yml` provides the web, Go, optional browser
+extension, Windows, and native webview checks for a desktop application. The
+governance caller supplies project paths, Go and Node versions, package scopes,
+and optional capabilities. The web build is passed to Go jobs as an artifact so
+they exercise the same assets built and tested by the web job.
+
+Choose `go-packages` deliberately: a broad `./...` can traverse a web project's
+`node_modules` directory and cause Go package loading errors. The optional
+Windows package and test filter support platform-specific filesystem checks;
+the optional webview target exercises native builds on Linux and macOS. Enabling
+the extension runs its checks and browser tests for both Chrome and Firefox.
+
+Calling these jobs through a reusable workflow changes their GitHub check-run
+names. Before switching a caller, inspect any required checks and update their
+configuration as needed, and run the generated caller as a pilot alongside the
+existing workflow.
