@@ -1,0 +1,79 @@
+name: Reusable Release Draft
+
+on:
+  workflow_call:
+    outputs:
+      release-id:
+        description: ID of the draft owned by this workflow run, empty for non-tag events.
+        value: ${{ jobs.prepare.outputs.release-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.create.outputs.result }}
+    steps:
+      - name: Validate manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$DEFAULT_BRANCH" || "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo '::error::Manual release tests require the default branch.' >&2
+            exit 1
+          fi
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.((0|[1-9][0-9]*)|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$ ]]; then
+            echo '::error::Invalid release tag.' >&2
+            exit 1
+          fi
+          printf 'RELEASE_TAG=%s\n' "$tag" >> "$GITHUB_ENV"
+          if [[ "$tag" == *-* ]]; then
+            echo 'RELEASE_PRERELEASE=true' >> "$GITHUB_ENV"
+          else
+            echo 'RELEASE_PRERELEASE=false' >> "$GITHUB_ENV"
+          fi
+      - name: Create or resume run-owned draft
+        id: create
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          result-encoding: string
+          script: |
+            const runID = process.env.GITHUB_RUN_ID;
+            if (!/^[1-9][0-9]*$/.test(runID ?? "")) {
+              throw new Error("workflow run ID must be a positive integer");
+            }
+            const repo = {owner: context.repo.owner, repo: context.repo.repo};
+            const marker = `<!-- shared-actions release run ${runID} -->`;
+            const releases = await github.paginate(github.rest.repos.listReleases, {...repo, per_page: 100});
+            const matches = releases.filter(release => release.tag_name === process.env.RELEASE_TAG);
+            if (matches.length) {
+              const [draft] = matches;
+              if (matches.length === 1 && draft.draft === true &&
+                  draft.author?.login === 'github-actions[bot]' &&
+                  draft.body?.split(/\r?\n/).includes(marker)) {
+                return draft.id;
+              }
+              throw new Error(`release ${process.env.RELEASE_TAG} already exists; expected this run's draft`);
+            }
+            const response = await github.rest.repos.createRelease({
+              ...repo,
+              body: marker,
+              draft: true,
+              generate_release_notes: true,
+              name: process.env.RELEASE_TAG,
+              prerelease: process.env.RELEASE_PRERELEASE === 'true',
+              tag_name: process.env.RELEASE_TAG,
+            });
+            return response.data.id;
