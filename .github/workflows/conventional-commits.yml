@@ -1,4 +1,5 @@
-name: Conventional Commits
+# Generated automatically by org-governance-bot. Do not edit manually.
+name: "Conventional Commits"
 
 on:
   pull_request:
